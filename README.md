@@ -22,11 +22,14 @@ Project Exvius explores how to rebuild the complete core systems of a large-scal
   - Multi-layer SpriteStudio (`ssbp`) animated battle backgrounds and front visual layers.
   - Combatant sprite animation playback (idle, attack, cast, chant, victory, hurt, dead).
   - Rich battle UI: EnemyRegion with target selection, PartyRegion with gesture controls (tap to attack, swipe for skill menu), BattleMenus with multi-cast drafting, floating damage labels, spark callouts, and UnitInfoPopup (Libra inspector).
+  - Battle MENU panel (`BattleMenuScreen`, opened by the square MENU button): Give Up on the engine's own loss path, Repeat Info listing the units Reload would act with, and the party's live HP/MP. It covers the field while open, so gestures cannot reach the units behind it.
   - Visual status and barrier feedback: floating status callouts ("SLEEP", "POISON", "BARRIER", "ABSORB", "BARRIER BREAK", "ATK UP"), sprite ailment tinting and animation freezing (stone petrify, blue sleep, yellow paralyze), animated health bar barrier gauges, and battle status badges on unit panels and the enemy target bar.
   - Dedicated `AudioService` handling BGM tracks and synchronized SFX.
 - **Story, Dialogue & Cutscenes**:
   - Binary cutscene script parser and playback engine (`EventPlayer`, `StoryFlow`).
   - Dynamic dialogue system with dual language support and complete Thai localization for Season 1 dialogue, Season 1 battle scripts, and Season 2 battle scripts.
+  - Thai localization of town and dungeon NPC text (`map_text`): line ids, engine tokens and Thai coverage are guarded by `tests/services/test_map_text_integrity.gd`.
+  - Story unit joins (`StoryUnitService`): the units the main story hands over are granted once the mission, town scene or event that unlocks them is reached.
 - **Exploration & Towns**:
   - Dynamic 2D tilemap generation directly from binary map and collision data.
   - Visual layer staging, NPC placement, and interactive story triggers.
@@ -39,7 +42,7 @@ Project Exvius explores how to rebuild the complete core systems of a large-scal
   - Hybrid persistence model supporting both stackable materials/items and unique non-fungible equipment instances.
   - Legality checks for equipment slots, dual-wielding requirements, and unit equipment allowances.
 - **Automated Testing Suite**:
-  - Comprehensive test suite covering 741 automated headless unit tests with 100% pass rate (`res://tests/run_tests.gd`).
+  - Comprehensive test suite covering 749 automated headless unit tests with 100% pass rate (`res://tests/run_tests.gd`).
 
 ## Tech Stack
 - **Engine**: Godot 4.6 (GDScript with static typing).
@@ -83,18 +86,28 @@ No backend, database server, or Docker setup is required. The game initializes s
 Run the headless test suite from the command line using Godot Console:
 
 ```powershell
-# Run full test suite (741 tests as of 2026-11-11; the count grows with new tests)
+# Run full test suite (749 tests as of 2026-11-11; the count grows with new tests)
 & "Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64_console.exe" --headless --path "ExviusReborn\godot" --script "res://tests/run_tests.gd"
 
 # Run specific feature tests (e.g. Battle engine)
 & "Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64_console.exe" --headless --path "ExviusReborn\godot" --script "res://tests/run_tests.gd" -- --filter=test_battle
 ```
 
+## What This Fork Adds
+This fork keeps the upstream systems and carries the work below on top of them:
+
+- Thai localization: Season 1/2 dialogue and battle scripts, plus town and dungeon `map_text`.
+- Battle MENU panel: Give Up, Repeat Info and the party's live status over the field.
+- Story unit joins: units handed over as the story reaches its join points.
+- Esper summon presentation fallback when an Effekseer resource is missing, and the item drop popup.
+
+Two folders are deliberately not in version control: `godot/assets/` (the datamined asset dump) and `translations/` (the translation working set, CSV/JSON). A clone therefore runs only after both are supplied locally.
+
 ## Additional Documentation
 - Architectural Rules & AI Pair-Programming Guidelines: `RULES.md`
 - Data Schema & Persistence Model: `DATA_SCHEMA.md`
 - Godot Client Service Overview: `godot/README.md`
-- Season 2 Translation Guide: `SEASON2_TRANSLATION_GUIDE.md`
+- Season 2 Translation Guide: `translations/story/SEASON2_TRANSLATION_GUIDE.md`
 
 ## Acknowledgements & Credits
 - **aEnigmatic/ffbe**: Invaluable datamine repositories and schemas.
