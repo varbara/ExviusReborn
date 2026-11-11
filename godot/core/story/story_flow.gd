@@ -146,11 +146,25 @@ func play(scene: Dictionary) -> Dictionary:
 	var done: int = int(scene.get("done_switch", 0))
 	if done != 0:
 		SwitchService.unlock_switches(str(done), "story_scene")
+
+	# Cutscene 111010201 / StoryEvent 1002001: Lasswell explains Visions to Rain and says:
+	# "เอาล่ะ เรน... ลองอัญเชิญวิชั่นดูสิ"
+	# Immediately cuts to the Tutorial Free Summon if not yet completed!
+	# STRICT ONE-TIME ONLY: Never triggers if already completed, and NEVER during Recollection replay.
+	var bin_id: String = str(scene.get("bin_id", ""))
+	var story_id: String = str(scene.get("story_event_id", ""))
+	var is_recollect: bool = bool(scene.get("is_recollection", false))
+	if not is_recollect and (bin_id == "111010201" or story_id == "1002001") and UnitService != null:
+		if not bool(UnitService.get("is_tutorial_summon_done")):
+			close()
+			return {"scene": "summon_ui", "is_tutorial": true}
+
 	return next
 
 
 ## Closes the cutscene screen if this flow opened it and it is still on top.
 func close() -> void:
+	AudioService.stop_ambient(0.5)
 	if _screen != null and is_instance_valid(_screen) and UIManager.get_current_scene() == _screen:
 		UIManager.pop()
 	_screen = null
@@ -191,6 +205,9 @@ static func switch_writes(before: Dictionary, after: Dictionary, kind: Callable)
 
 ## Goes where a scene led: a mission's battle (type 0) or a town (type 1).
 static func go_to(location: Dictionary) -> void:
+	if str(location.get("scene", "")) == "summon_ui" or str(location.get("type", "")) == "summon_tutorial":
+		UIManager.set_root("summon_ui", {"is_tutorial": true})
+		return
 	var id: String = str(location.get("id", ""))
 	if int(location.get("type", -1)) == TYPE_TOWN:
 		await enter_town(id)

@@ -258,8 +258,52 @@ func get_missions(dungeon_id: String) -> Array:
 		[dungeon_id]
 	)
 
+## The battle background row a mission draws with, as `battle_bg`'s battleBgId, or
+## "" when nothing in reach has one.
+##
+## The game's own master data leaves `mission.battleBgId` 0 on 10,297 of its 22,603
+## missions -- Deserted Highroad's stages among them, every phase 0 as well -- so a
+## stage is resolved in order: its own background, its phase's, then the nearest
+## stage of the same land that has one. Without the last step those stages drew the
+## plain backdrop.
+func resolve_battle_bg_id(mission_id: String) -> String:
+	var own = query(
+		"SELECT battleBgId FROM mission WHERE missionId = ? AND coalesce(battleBgId, 0) != 0 LIMIT 1",
+		[mission_id]
+	)
+	if not own.is_empty():
+		return str(own[0].get("battleBgId", ""))
+
+	var phase = query(
+		"SELECT battleBgId FROM mission_phase WHERE missionId = ? AND coalesce(battleBgId, 0) != 0 "
+		+ "ORDER BY phaseNum LIMIT 1",
+		[mission_id]
+	)
+	if not phase.is_empty():
+		return str(phase[0].get("battleBgId", ""))
+
+	# The area first (Lanzelt's stages look like Lanzelt), then the wider land.
+	for scope in ["areaId", "landId"]:
+		var near = query(
+			"SELECT m.battleBgId AS battleBgId FROM mission m JOIN dungeon d ON d.dungeonId = m.dungeonId "
+			+ "WHERE d." + scope + " = (SELECT d2." + scope + " FROM mission m2 "
+			+ "                        JOIN dungeon d2 ON d2.dungeonId = m2.dungeonId WHERE m2.missionId = ?) "
+			+ "AND coalesce(m.battleBgId, 0) != 0 "
+			+ "ORDER BY abs(d.dispOrder - (SELECT d3.dispOrder FROM mission m3 JOIN dungeon d3 "
+			+ "                            ON d3.dungeonId = m3.dungeonId WHERE m3.missionId = ?)), "
+			+ "d.dispOrder, m.dispOrder LIMIT 1",
+			[mission_id, mission_id]
+		)
+		if not near.is_empty():
+			return str(near[0].get("battleBgId", ""))
+	return ""
+
+
 func get_mission_bg(mission_id: String) -> String:
-	var rows = query("SELECT bg.fileInfo from battle_bg bg join mission m on m.battleBgId = bg.battleBgId where m.missionId = ? limit 1", [mission_id])
+	var bg_id: String = resolve_battle_bg_id(mission_id)
+	if bg_id == "":
+		return ""
+	var rows = query("SELECT fileInfo FROM battle_bg WHERE battleBgId = ? LIMIT 1", [bg_id])
 	return str(rows[0].get("fileInfo", "")) if not rows.is_empty() else ""
 
 
@@ -267,7 +311,10 @@ func get_mission_bg(mission_id: String) -> String:
 ## unnamed column Dc5w1Yda), or "" when it has none. BattleBackground.parse_layers
 ## reads them.
 func get_mission_bg_layers(mission_id: String) -> String:
-	var rows = query("SELECT bg.Dc5w1Yda AS layers FROM battle_bg bg JOIN mission m ON m.battleBgId = bg.battleBgId WHERE m.missionId = ? LIMIT 1", [mission_id])
+	var bg_id: String = resolve_battle_bg_id(mission_id)
+	if bg_id == "":
+		return ""
+	var rows = query("SELECT Dc5w1Yda AS layers FROM battle_bg WHERE battleBgId = ? LIMIT 1", [bg_id])
 	if rows.is_empty() or rows[0].get("layers") == null:
 		return ""
 	return str(rows[0]["layers"])
@@ -726,10 +773,11 @@ func get_mission_timeline(mission_id: String) -> Array:
 ## One row per trigger segment: cond (1=start, 2=victory, 3=enemy-defeated,
 ## 4=HP% [condParam monsterId,HP%], 5=state, 7=on-hit, 8=turn, 10=passive),
 ## condParam, skipFlg, paramEn (EN dialogue string; null when only JP exists),
-## paramJp. mission_timeline.gd parses paramEn into ordered {speaker,text} lines.
+## paramJp, paramTh (Thai dialogue string; empty when untranslated).
+## mission_timeline.gd parses paramTh and falls back to paramEn.
 func get_battle_script(battle_script_id: String) -> Array:
 	return query(
-		"SELECT cond, condParam, skipFlg, paramEn, paramJp"
+		"SELECT cond, condParam, skipFlg, paramEn, paramJp, paramTh"
 		+ " FROM battle_script WHERE battleScriptId = ? ORDER BY cond",
 		[battle_script_id]
 	)
@@ -794,6 +842,13 @@ func get_story_event_scene(story_event_id: String, mission_id: String = "") -> D
 		bin_id = get_event_id_for_resource(str(events[0].get("resourceId", "")))
 	if bin_id == "" and int(row.get("locationType", 0)) == 1:
 		bin_id = str(get_mission_event_resource(str(row.get("targetId", ""))).get("event_id", ""))
+	if bin_id == "" and int(row.get("locationType", 0)) == 2:
+		var packages: Array = get_town_event_packages(int(row.get("targetId", 0)))
+		for pkg in packages:
+			var candidate_bin: String = str(pkg.get("bin_id", ""))
+			if candidate_bin != "":
+				bin_id = candidate_bin
+				break
 	if bin_id == "" and mission_id != "":
 		bin_id = str(get_mission_event_resource(mission_id).get("event_id", ""))
 	if bin_id == "":
@@ -1458,15 +1513,31 @@ func _build_passive_record(row: Dictionary) -> Dictionary:
 func get_effect_data(effect_group_id: int) -> Array:
 	var rows: Array = query("select eg.effectGroupId, eg.name, eg.effectData from effect_group eg"
 		+ " where effectGroupId = ? limit 1", [effect_group_id])
-	var effect_data = rows[0].get("effectData") if not rows.is_empty() else {}
-	var effect_ids = effect_data.split(',') if effect_data != null and effect_data.contains(',') else [effect_data]
-	if effect_ids[0] == null:
+	if rows.is_empty():
 		return []
-	var retval = []
-	for id in effect_ids:
-		var temp = query("select eff.effectId, eff.name, eff.effectType, eff.fileInfo from effect eff"
-		+ " where effectId = ?", [id.split(':')[1]])
-		retval.append(temp[0].get("fileInfo"))
+	# effectData is normally "1:1000001:...:2" (a comma-joined list of entries),
+	# but a group may hold a single entry -- or the column may arrive as a number,
+	# in which case the old `.contains()` call threw and the whole effect was lost.
+	var raw: Variant = rows[0].get("effectData")
+	if raw == null:
+		return []
+	# A malformed row must not abort the caller's whole effect list.
+	var retval: Array = []
+	for entry in str(raw).split(","):
+		var parts: PackedStringArray = entry.split(":")
+		if parts.size() < 2:
+			continue
+		var effect_id: String = parts[1].strip_edges()
+		if effect_id == "" or not effect_id.is_valid_int():
+			continue
+		var temp: Array = query(
+			"select eff.effectId, eff.name, eff.effectType, eff.fileInfo from effect eff"
+			+ " where effectId = ?", [effect_id])
+		if temp.is_empty():
+			continue
+		var file_info: Variant = temp[0].get("fileInfo")
+		if file_info != null and str(file_info) != "":
+			retval.append(file_info)
 	return retval
 
 # === Skills: limit bursts ===
@@ -1745,6 +1816,56 @@ func get_all_cryst() -> Array:
 	var values: Array[String] = []
 	values.assign(rows.map(func(dict): return str(dict["itemId"])))
 	return values
+
+## Queries where an item can be acquired:
+## - dungeons: array of { dungeon_name, mission_name, land_name, mission_id,
+##   mission_cleared } (mission_cleared is 0/1 from the caller's save, filled by
+##   the presentation layer so this stays a pure query)
+## - shops: array of { shop_name, town_name, land_name }
+func get_item_drop_locations(item_id: int) -> Dictionary:
+	var item_str: String = str(item_id)
+	var dungeon_sql: String = (
+		"SELECT DISTINCT d.name AS dungeon_name, m.name AS mission_name, COALESCE(l.name, '') AS land_name, "
+		+ "CAST(m.missionId AS TEXT) AS mission_id, CAST(m.dungeonId AS TEXT) AS dungeon_id "
+		+ "FROM ( "
+		+ "    SELECT DISTINCT monsterId "
+		+ "    FROM monster_parts "
+		+ "    WHERE dropInfo LIKE '%' || ? || '%' OR stealInfo LIKE '%' || ? || '%' "
+		+ ") mp_mon "
+		+ "JOIN ( "
+		+ "    SELECT mp.missionId, bg.monsterId "
+		+ "    FROM mission_phase mp "
+		+ "    JOIN battle_group bg ON mp.targetId = bg.battleGroupId "
+		+ "    UNION "
+		+ "    SELECT mp.missionId, bg.monsterId "
+		+ "    FROM mission_phase mp "
+		+ "    JOIN battle_lottery bl ON mp.targetId = bl.poolId "
+		+ "    JOIN battle_group bg ON bl.battleGroupId = bg.battleGroupId "
+		+ ") phase_mon ON mp_mon.monsterId = phase_mon.monsterId "
+		+ "JOIN mission m ON phase_mon.missionId = m.missionId "
+		+ "JOIN dungeon d ON m.dungeonId = d.dungeonId "
+		+ "LEFT JOIN land l ON m.landId = l.landId "
+		+ "ORDER BY m.missionId ASC "
+		+ "LIMIT 30"
+	)
+	var dungeon_rows: Array = query(dungeon_sql, [item_str, item_str])
+
+	var shop_sql: String = (
+		"SELECT DISTINCT ts.name AS shop_name, t.name AS town_name, COALESCE(l.name, '') AS land_name "
+		+ "FROM store_item si "
+		+ "JOIN town_store ts ON si.storeId = ts.storeId "
+		+ "LEFT JOIN town t ON ts.townId = t.townId "
+		+ "LEFT JOIN land l ON t.landId = l.landId "
+		+ "WHERE si.targetId = ? "
+		+ "ORDER BY t.townId ASC "
+		+ "LIMIT 10"
+	)
+	var shop_rows: Array = query(shop_sql, [item_str])
+
+	return {
+		"dungeons": dungeon_rows,
+		"shops": shop_rows
+	}
 
 
 # === Recipe ===

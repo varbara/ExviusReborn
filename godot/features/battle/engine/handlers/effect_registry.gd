@@ -6,6 +6,8 @@ extends RefCounted
 ## event. unknown_types() checks the registered types against the schema, so a typo
 ## in a handler's type list shows up at startup instead of never matching.
 
+const _LibraHandlerScript = preload("res://features/battle/engine/handlers/libra_handler.gd")
+
 var _handlers: Dictionary = {}
 
 
@@ -27,6 +29,7 @@ static func create_default() -> EffectRegistry:
 	registry.register(GrantHandler.new())
 	registry.register(DelayHandler.new())
 	registry.register(JumpHandler.new())
+	registry.register(_LibraHandlerScript.new())
 	return registry
 
 

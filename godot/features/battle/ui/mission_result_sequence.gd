@@ -170,6 +170,10 @@ func _show_experience() -> void:
 	challenges.visible = false
 	item.visible = false
 	_unit_exp_rows.clear()
+	# Clean up any previously spawned rows, keeping only the hidden template
+	for child in unit_container.get_children():
+		if child != unit_panel:
+			child.queue_free()
 	for party_unit in _party:
 		_config_unit(party_unit)
 	_start_unit_exp_animation()
@@ -275,6 +279,14 @@ func _exp_award_for(instance_id: String) -> Dictionary:
 			return award
 	return {}
 
+func _trust_award_for(instance_id: String) -> Dictionary:
+	if instance_id == "":
+		return {}
+	for award in _result.get("trust_awards", []):
+		if str(award.get("instance_id", "")) == instance_id:
+			return award
+	return {}
+
 func _config_unit(party_unit: Dictionary) -> void:
 	if party_unit == {}:
 		var placeholder: TextureRect = TextureRect.new()
@@ -317,8 +329,14 @@ func _config_unit(party_unit: Dictionary) -> void:
 		lb_name_text.text = lb_name
 	else:
 		lb_name_text.text = str(unit_data.get("limitBurstId"))
-	var tm_value_text = unit_node.get_node("UnitBondsIconMini/TMValue")
-	tm_value_text.text = str(unit_data.get("trust_value"))
+	var tm_value_text: Label = unit_node.get_node("UnitBondsIconMini/TMValue") as Label
+	var tm_award: Dictionary = _trust_award_for(str(party_unit.get("instance_id", "")))
+	var current_tm: float = float(unit_data.get("trust_value", 0.0))
+	if not tm_award.is_empty():
+		tm_value_text.text = "%.1f%% (+0.1)" % current_tm
+		tm_value_text.modulate = Color(0.4, 1.0, 0.4)
+	else:
+		tm_value_text.text = "%.1f%%" % current_tm
 	var job_name_text = unit_node.get_node("UnitCharaLabelJob/JobName")
 	job_name_text.text = GameDatabase.get_job_name(unit_data.get("jobId"))
 	var unit_name_text = unit_node.get_node("UnitName")
@@ -330,13 +348,41 @@ func _config_unit(party_unit: Dictionary) -> void:
 	var exp_bar: TextureProgressBar = unit_node.get_node("UnitExpBg/UnitExpBar")
 	_register_unit_exp_row(unit_data, str(party_unit.get("instance_id", "")), exp_bar, lvl_text, unit_next_exp)
 
-	var unit_texture = unit_node.get_node("UnitTexture")
+	var unit_texture: Control = unit_node.get_node_or_null("UnitTexture") as Control
 	var unit_visual: Control = UNIT_SCENE.instantiate() as Control
-	if unit_visual:
-		unit_visual.scene_size = "small"
-		unit_visual.unit_data_to_load = unit_data
-		unit_visual.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	if unit_visual != null and unit_texture != null:
+		unit_texture.clip_contents = true
+		unit_visual.set("scene_size", "small")
+		unit_visual.set("unit_data_to_load", unit_data)
+		unit_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		unit_texture.add_child(unit_visual)
+		
+		# Reset anchors, offsets and scale to fit inside the UnitTexture box cleanly
+		unit_visual.anchor_left = 0.0
+		unit_visual.anchor_right = 0.0
+		unit_visual.anchor_top = 0.0
+		unit_visual.anchor_bottom = 0.0
+		unit_visual.offset_left = 0.0
+		unit_visual.offset_right = 160.0
+		unit_visual.offset_top = 0.0
+		unit_visual.offset_bottom = 168.0
+		unit_visual.set("pivot_offset_ratio", Vector2.ZERO)
+		unit_visual.pivot_offset = Vector2.ZERO
+		
+		var ped: Control = unit_visual.get_node_or_null("Pedestal") as Control
+		if ped != null:
+			ped.set("pivot_offset_ratio", Vector2.ZERO)
+			ped.pivot_offset = Vector2.ZERO
+		
+		var visual_name: Control = unit_visual.get_node_or_null("UnitName") as Control
+		if visual_name != null:
+			visual_name.visible = false
+		
+		var scale_factor: float = 0.62
+		unit_visual.scale = Vector2(scale_factor, scale_factor)
+		var tex_w: float = unit_texture.size.x if unit_texture.size.x > 0.0 else 127.0
+		var tex_h: float = unit_texture.size.y if unit_texture.size.y > 0.0 else 127.0
+		unit_visual.position = Vector2((tex_w - 160.0 * scale_factor) / 2.0, (tex_h - 168.0 * scale_factor) / 2.0 - 14.0)
 	
 	unit_node.visible = true
 	unit_container.add_child(unit_node)
@@ -350,7 +396,8 @@ func _post_battle_unit(unit_data: Dictionary) -> Dictionary:
 		return unit_data
 
 	var award: Dictionary = _exp_award_for(instance_id)
-	if int(award.get("level_after", 0)) <= int(award.get("level_before", 0)):
+	var tm_award: Dictionary = _trust_award_for(instance_id)
+	if int(award.get("level_after", 0)) <= int(award.get("level_before", 0)) and tm_award.is_empty():
 		return unit_data
 
 	for owned_unit in UnitService.owned_units_ids:

@@ -39,7 +39,16 @@ func load_from_local() -> void:
 	owned_items = _normalize_payload(data)
 
 func reset_to_starter() -> void:
-	owned_items = {"stackables": {}, "equipment": [
+	owned_items = {"stackables": {
+		# Ailments are permanent on the party (that is how the original game works),
+		# so a new player who catches poison or blindness before buying anything has
+		# no way out and just dies. These three cure the abilities that matter early
+		# and are the same items the shops sell, so the starter kit stays consistent
+		# with the rest of the economy rather than inventing free power.
+		"102000100": 3,  # Antidote    -- poison
+		"102001100": 3,  # Eye Drops   -- blind
+		"102006100": 3,  # Gold Needle -- petrify
+	}, "equipment": [
 		{
 			"equipped_to": "starter_100000102",
 			"instance_id": "starter_100000102_LeatherPlate",

@@ -43,11 +43,14 @@ var _views: Dictionary = {}
 ## Enemy id -> its wrapper's position before it left the field, for the enemies in the air.
 var _away: Dictionary = {}
 var _damage_numbers: DamageNumberSpawner
+var _effects: EffectSpawner
 var _texture_cache: Dictionary = {}
+var last_overkill_enemy_id: int = -1
 
 
 func _ready() -> void:
 	_damage_numbers = DamageNumberSpawner.new(self)
+	_effects = EffectSpawner.new(self)
 
 
 func _exit_tree() -> void:
@@ -110,6 +113,7 @@ func clear() -> void:
 		child.queue_free()
 	_views.clear()
 	_away.clear()
+	last_overkill_enemy_id = -1
 
 
 func has_view(enemy_id: int) -> bool:
@@ -143,12 +147,64 @@ func is_away(enemy_id: int) -> bool:
 	return _away.has(enemy_id)
 
 
-## A hit: the sprite shakes and the damage floats up.
-func show_hit(enemy_id: int, amount: int) -> void:
+## A hit: the sprite shakes and flashes, impact VFX plays, and the damage floats up
+## (with an OVERKILL!! badge when the hit exceeds the enemy's remaining HP).
+func show_hit(enemy_id: int, amount: int, overkill: bool = false, spark: bool = false, magic: bool = false) -> void:
 	if not _views.has(enemy_id):
 		return
 	BattleTweens.shake(_views[enemy_id]["sprite"])
-	_damage_numbers.spawn(amount, _views[enemy_id]["damage"])
+	_effects.spawn_hit_impact(_views[enemy_id]["wrapper"], spark, magic)
+	if overkill:
+		last_overkill_enemy_id = enemy_id
+	_damage_numbers.spawn(amount, _views[enemy_id]["damage"], overkill)
+
+
+## A follow-up hit on an enemy that just hit 0 HP: shakes, sparks, and shows OVERKILL!!.
+func show_overkill(enemy_id: int) -> void:
+	if not _views.has(enemy_id):
+		return
+	last_overkill_enemy_id = enemy_id
+	var sprite: CombatSprite = _views[enemy_id]["sprite"]
+	sprite.show()
+	sprite.modulate.a = maxf(sprite.modulate.a, 0.8)
+	_start_death_animation(enemy_id)
+	BattleTweens.hit_flash(sprite)
+	_effects.spawn_hit_impact(_views[enemy_id]["wrapper"], true, false)
+	_damage_numbers.spawn_overkill(_views[enemy_id]["damage"])
+
+
+func show_heal(enemy_id: int, amount: int) -> void:
+	if _views.has(enemy_id):
+		_damage_numbers.spawn_heal(amount, _views[enemy_id]["damage"])
+
+
+func show_miss(enemy_id: int, text: String = "MISS") -> void:
+	if _views.has(enemy_id):
+		_damage_numbers.spawn_status_text(text, _views[enemy_id]["damage"])
+
+
+func show_status_text(enemy_id: int, text: String, color: Color = Color(0.9, 0.95, 1.0, 1.0)) -> void:
+	if _views.has(enemy_id):
+		_damage_numbers.spawn_status_text(text, _views[enemy_id]["damage"], color)
+
+
+func update_status_visual(enemy_id: int, statuses: Array) -> void:
+	if _views.has(enemy_id):
+		(_views[enemy_id]["sprite"] as CombatSprite).update_status_visual(statuses)
+
+
+## Plays an attack's or skill's `effect_frames` on `enemy_id` (or the field centre).
+func spawn_effects(effect_frames: Array, speed: float, enemy_id: int = -1) -> void:
+	var target_container: Control = _views[enemy_id]["wrapper"] if _views.has(enemy_id) else _container
+	_effects.spawn(effect_frames, target_container, speed)
+
+
+func overkill_count() -> int:
+	return _damage_numbers.overkill_count if _damage_numbers != null else 0
+
+
+func effect_paths() -> Array[String]:
+	return _effects.spawned_paths if _effects != null else ([] as Array[String])
 
 
 func play_attack(enemy_id: int) -> void:
@@ -157,7 +213,17 @@ func play_attack(enemy_id: int) -> void:
 
 
 ## The enemy shakes and fades out; its arrow goes.
-func play_death(enemy_id: int) -> void:
+func play_death(enemy_id: int, is_boss: bool = false) -> void:
+	if not _views.has(enemy_id):
+		return
+	if is_boss:
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_special_extinct_1.wav")
+	else:
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_extinct_1.wav")
+	_start_death_animation(enemy_id)
+
+
+func _start_death_animation(enemy_id: int) -> void:
 	if not _views.has(enemy_id):
 		return
 	var sprite: CombatSprite = _views[enemy_id]["sprite"]

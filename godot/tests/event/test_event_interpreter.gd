@@ -255,8 +255,13 @@ func test_the_cursor_blinks_while_it_waits_for_a_tap() -> void:
 
 
 func test_unhandled_opcodes_are_skipped_and_counted() -> void:
-	var interpreter: EventInterpreter = _run(_frame(0x69, _u32(0x37)) + _frame(0x69, _u32(0x6a)) + _end())
-	assert_eq(interpreter.skipped_ops, {0x69: 2})
+	var interpreter: EventInterpreter = _run(_frame(0xfe, _u32(0x37)) + _frame(0xfe, _u32(0x6a)) + _end())
+	assert_eq(interpreter.skipped_ops, {0xfe: 2})
+	assert_eq(interpreter.end_reason, "end")
+
+
+func test_op_play_se_invokes_stage_play_se() -> void:
+	var interpreter: EventInterpreter = _run(_frame(EventInterpreter.OP_PLAY_SE, _u32(107)) + _end())
 	assert_eq(interpreter.end_reason, "end")
 
 
@@ -266,3 +271,83 @@ func test_bins_before_1025_reference_actors_with_u16_ids() -> void:
 	var payload: PackedByteArray = ref + PackedByteArray([0, 0]) + _u16(116) + _u16(58) + PackedByteArray([0, 1, 1, 0])
 	_run(_frame(EventInterpreter.OP_MOVE, payload) + _end())
 	assert_eq(_stage.actors["pc1"].position, Vector2(116, 58))
+
+
+func test_op_74_plays_movie_and_blocks_until_finished_or_stopped() -> void:
+	var movie_name: PackedByteArray = "op_clip.usm".to_ascii_buffer()
+	var movie_payload: PackedByteArray = _u16(movie_name.size()) + movie_name
+	var bgm_name: PackedByteArray = "la326_movie_opening.acb".to_ascii_buffer()
+	var bgm_payload: PackedByteArray = _u16(bgm_name.size()) + bgm_name + _u32(0)
+	var script: PackedByteArray = _frame(EventInterpreter.OP_MOVIE, movie_payload) + _frame(EventInterpreter.OP_BGM, bgm_payload) + _end()
+	var interpreter: EventInterpreter = _start(script)
+	_frames(interpreter, 2)
+	assert_eq(_stage.movies_played, ["op_clip.usm"] as Array[String])
+	assert_true(_stage.is_movie_playing(), "movie blocks the script while playing")
+	assert_false(interpreter.done)
+	assert_eq(_stage.bgm_played, [] as Array[String], "BGM after movie has not run yet")
+	_stage.stop_movie()
+	_frames(interpreter, 2)
+	assert_true(interpreter.done)
+	assert_eq(_stage.bgm_played, ["la326_movie_opening.acb"] as Array[String])
+
+
+func test_op_55_and_6f_play_and_stop_ssbp_effects() -> void:
+	var file_buf: PackedByteArray = "ev_opening.ssbp".to_ascii_buffer()
+	var pack_buf: PackedByteArray = "ev_opening".to_ascii_buffer()
+	var anim_buf: PackedByteArray = "opening_bg/anime".to_ascii_buffer()
+	var play_payload: PackedByteArray = (
+		_u32(1501)
+		+ _u16(file_buf.size()) + file_buf
+		+ _u16(pack_buf.size()) + pack_buf
+		+ _u16(anim_buf.size()) + anim_buf
+		+ _u32(1073) + _u32(0) + _u32(3)
+		+ PackedByteArray([0, 2])
+	)
+	var stop_payload: PackedByteArray = _u32(1501)
+	var script: PackedByteArray = (
+		_frame(EventInterpreter.OP_PLAY_SSBP, play_payload)
+		+ _frame(EventInterpreter.OP_WAIT, _u16(2))
+		+ _frame(EventInterpreter.OP_STOP_SSBP, stop_payload)
+		+ _end()
+	)
+	var interpreter: EventInterpreter = _start(script)
+	_frames(interpreter, 1)
+	assert_eq(_stage.ssbp_played, ["opening_bg/anime"] as Array[String])
+	assert_true(_stage.active_ssbp.has(1501), "ssbp effect 1501 is active")
+	var player: SsbpPlayer = _stage.active_ssbp[1501][0]
+	assert_eq(player.position, Vector2(1073, 0))
+	assert_eq(player.z_index, -1, "z <= 5 sits behind sublayer 0")
+	_frames(interpreter, 5)
+	assert_true(interpreter.done)
+	assert_false(_stage.active_ssbp.has(1501), "op 0x6f stops ssbp effect 1501")
+
+
+func test_op_5f_and_66_play_and_stop_vfx_effects() -> void:
+	var id_buf: PackedByteArray = "19".to_ascii_buffer()
+	var file_buf: PackedByteArray = "map_crystal_fina_001.bmb".to_ascii_buffer()
+	var play_payload: PackedByteArray = (
+		_u16(id_buf.size()) + id_buf
+		+ _u32(19)
+		+ _u16(file_buf.size()) + file_buf
+		+ _u32(1398) + _u32(435) + _u32(7) + _u32(0)
+		+ PackedByteArray([100, 0])
+	)
+	var stop_payload: PackedByteArray = _u32(19)
+	var script: PackedByteArray = (
+		_frame(EventInterpreter.OP_PLAY_VFX, play_payload)
+		+ _frame(EventInterpreter.OP_WAIT, _u16(2))
+		+ _frame(EventInterpreter.OP_STOP_VFX, stop_payload)
+		+ _end()
+	)
+	var interpreter: EventInterpreter = _start(script)
+	_frames(interpreter, 1)
+	assert_eq(_stage.vfx_played, ["map_crystal_fina_001.bmb"] as Array[String])
+	assert_true(_stage.active_vfx.has(19), "vfx 19 is active")
+	var entry: Dictionary = _stage.active_vfx[19]
+	assert_true(bool(entry["loop"]), "crystal VFX targeted by 0x66 loops until stopped")
+	var node: Node2D = entry["node"]
+	assert_eq(node.position, Vector2(1398, 435))
+	assert_eq(node.z_index, 7)
+	_frames(interpreter, 5)
+	assert_true(interpreter.done)
+	assert_false(_stage.active_vfx.has(19), "op 0x66 stops vfx 19")

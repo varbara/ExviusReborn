@@ -1,255 +1,205 @@
-# Data Schema
+# Data Schema & Persistence Architecture
 
-This document serves as the definitive map for data manipulation across the game. It outlines the structure of our static game data templates and how dynamic player data is saved in the backend.
+This document serves as the definitive reference for static data templates and dynamic player save persistence across Project Exvius: Reborn.
 
-## 1. Static Unit Template (`units.json`)
+---
 
-Provides the base data and progression metrics for units. This is a high-level overview of the primary gameplay-related fields.
+## 1. Static Data Architecture
 
-```json
-{
-    "100000102": {
-        "name": "Rain",
-        "rarity_min": 2,
-        "rarity_max": 6,
-        "job": "Knight",
-        "equip": [1, 2, 3, 9, 15, 30, 31, 40, 41, 50, 51, 52, 60], // Array of valid equipment type IDs
-        "entries": {
-            "100000102": { // ID matching the base unit, often represents a specific rarity
-                "rarity": 2,
-                "stats": {
-                    "HP": [378, 1144, 900, 450], // Base stats scaling arrays [min, max, etc.]
-                    "MP": [15, 45, 150, 75],
-                    "ATK": [14, 41, 65, 32],
-                    "DEF": [13, 40, 65, 32],
-                    "MAG": [13, 39, 65, 32],
-                    "SPR": [12, 37, 65, 32]
-                },
-                "limitburst_id": 100000102,
-                "attack_count": 2,
-                "ability_slots": 1,
-                "element_resist": [0, 0, 0, 0, 0, 0, 0, 0], // Fire, Ice, Lightning, Water, Wind, Earth, Light, Dark
-                "status_resist": [0, 0, 0, 0, 0, 0, 0, 0], // Poison, Blind, Sleep, Silence, Paralysis, Confusion, Disease, Petrification
-                "awakening": { // Requirements to upgrade to the next rarity
-                    "gil": 750,
-                    "materials": [
-                        [200000500, 5], // [Item ID, Quantity]
-                        [200000800, 3]
-                    ]
-                }
-            }
-        }
-    }
-}
-```
+Static data is split into two complementary stores:
+1. **Baked JSON Templates**: Fast, direct-access JSON structures loaded into memory at startup via `StaticDataLoader` / `StaticData`.
+2. **Static SQLite Database (`ffbe-data.db`)**: Read-only SQLite relational database accessed via `GameDatabase` for missions, encounters, monster AI, dialogue scripts, and item databases.
 
-## 2. Static Equipment Template (`equipment.json`)
-
-Provides the static properties of equippable items (weapons, armor, accessories).
+### A. Static Unit Template (`units.json`)
+Provides base progression, growth curves, equipment permissions, and rarity entries for playable units.
 
 ```json
 {
-    "301000200": {
-        "name": "Bronze Knife",
-        "rarity": 1,
-        "type_id": 1,
-        "type": "Short Sword",
-        "slot_id": 1,
-        "slot": "Weapon", // Valid slots include Weapon, Shield, Head, Body, Accessory
-        "is_twohanded": false,
+  "100000102": {
+    "name": "Rain",
+    "rarity_min": 2,
+    "rarity_max": 6,
+    "job": "Knight",
+    "equip": [1, 2, 3, 9, 15, 30, 31, 40, 41, 50, 51, 52, 60],
+    "entries": {
+      "100000102": {
+        "rarity": 2,
         "stats": {
-            "HP": 0,
-            "MP": 0,
-            "ATK": 10,
-            "DEF": 0,
-            "MAG": 0,
-            "SPR": 0,
-            "element_resist": null,
-            "element_inflict": null,
-            "status_resist": null,
-            "status_inflict": null
+          "HP": [378, 1144, 900, 450],
+          "MP": [15, 45, 150, 75],
+          "ATK": [14, 41, 65, 32],
+          "DEF": [13, 40, 65, 32],
+          "MAG": [13, 39, 65, 32],
+          "SPR": [12, 37, 65, 32]
         },
-        "price_buy": 100,
-        "price_sell": 10
+        "limitburst_id": 100000102,
+        "attack_count": 2,
+        "ability_slots": 1,
+        "element_resist": [0, 0, 0, 0, 0, 0, 0, 0],
+        "status_resist": [0, 0, 0, 0, 0, 0, 0, 0],
+        "awakening": {
+          "gil": 750,
+          "materials": [
+            [200000500, 5],
+            [200000800, 3]
+          ]
+        }
+      }
     }
-}
-```
-
-
-## Terminology
-* `template_id`: A static string ID from the datamine JSONs (e.g., "10001" for Iron Sword, "101" for Rain).
-* `instance_id`: A unique UUID v4 assigned to a player's specific owned entity (e.g., "abc-123").
-
-## 3. Player Units (Granular Storage)
-* **Collection:** `"unit"`
-* **Key:** `<instance_id>`
-* **Description:** Each unit is saved as its own individual row in the database.
-```json
-{
-  "instance_id": "b019e4b9-...",
-  "unit_id": "100000102",
-  "level": 13,
-  "xp": 4200,
-  "next_xp": 5500,
-  "current_rarity": 6,
-  "trust_value": 35.5,
-  "limitburst_level": 3,
-  "limitburst_xp": 12,
-  "is_locked": false,
-  "current_accumulated_exp": 0,
-  "equipment": {
-    "r_hand": "uuid-of-equipment-1",
-    "head": "",
-    "body": ""
   }
 }
 ```
 
+### B. Static Equipment Template (`equipment.json`)
+Defines the stats, slots, handedness, and element/status affinities of equippable gear.
 
-
-## 4. Player Inventory (Hybrid Storage)
-The get_player_items_rpc returns a combined Dictionary containing both stackable items and unique equipment.
-### A. Stackables (Fungible)
-* **Collection**: "inventory"
-* **Key**: "stackables"
-* **Description**: A single dictionary mapping the static template_id to an integer quantity.
-### B. Equipment (Non-Fungible)
-* **Collection**: "equipment"
-* **Key**: <instance_id>
-* **Description**: Each piece of equipment is its own unique instance. It contains an equipped_to field which is either null or the instance_id of the unit holding it.
-Example Payload from get_player_items_rpc:
 ```json
 {
-  "stackables": {
-    "item_potion_01": 5,
-    "mat_iron": 99
-  },
-  "equipment": [
-    { 
-      "instance_id": "uuid-1", 
-      "template_id": "301000200", 
-      "equipped_to": null 
+  "301000200": {
+    "name": "Bronze Knife",
+    "rarity": 1,
+    "type_id": 1,
+    "type": "Short Sword",
+    "slot_id": 1,
+    "slot": "Weapon",
+    "is_twohanded": false,
+    "stats": {
+      "HP": 0,
+      "MP": 0,
+      "ATK": 10,
+      "DEF": 0,
+      "MAG": 0,
+      "SPR": 0,
+      "element_resist": null,
+      "element_inflict": null,
+      "status_resist": null,
+      "status_inflict": null
     },
-    { 
-      "instance_id": "uuid-2", 
-      "template_id": "301000200", 
-      "equipped_to": "unit-uuid-5" 
-    }
-  ]
+    "price_buy": 100,
+    "price_sell": 10
+  }
 }
 ```
 
-## 5. Critical RPC Payloads
-Equipping an Item (rpc_equip_item)
-Godot must pass the unique instance IDs, not the template IDs.
+### C. SQLite Master Database (`ffbe-data.db`)
+Queried at runtime through the `GameDatabase` service:
+* **World & Missions**:
+  * `world`, `land`, `area`, `town`, `dungeon`: Navigation and world progression hierarchy.
+  * `mission`: Mission metadata, energy cost, first-clear rewards, wave count, and background links.
+  * `mission_wave`: Spawn formations and monster IDs per wave.
+  * `battle_bg`: Background JPG paths and animated SpriteStudio (`ssbp`) layer definitions.
+* **Combat & Entities**:
+  * `monster`, `monster_parts`: Base stats, resistances, race/killer traits, and drop rates.
+  * `monster_ai`: Scripted AI logic with trigger conditions and target priority.
+  * `battle_scripts`: Localized combat dialogue (in-battle speech, boss cutscenes, and triggers) in English, Japanese, and Thai.
+* **Abilities & Magic**:
+  * `skill`, `magic`, `materia`: Opcode parameters (`processId`, `processParam`, `targetType`), MP costs, and frame timings.
+  * `beast`, `beast_board`: Esper progression, stat growth patterns, and skill boards.
+
+---
+
+## 2. Dynamic Player Persistence (`user://game_state/`)
+
+All player data is stored locally in the user directory using atomic JSON snapshots managed by the `Persistence` service (`user://game_state/<save_id>__<file>.json`). The default save prefix is `default__`.
+
+### Terminology
+* `template_id`: Static string or integer ID matching the datamine (e.g. `"100000102"` for Rain, `"301000200"` for Bronze Knife).
+* `instance_id`: Unique UUID v4 string identifying an individual owned unit or piece of equipment.
+
+---
+
+### A. Player Profile (`stats.json`)
+Managed by `PlayerProfile` service:
+
 ```json
-
 {
-  "unit_instance_id": "unit-uuid-5",
-  "slot": "r_hand",
-  "item_instance_id": "uuid-2"
-}
-```
-
-## 6. Saved Player Stats (Player Stats)
-
-Player stats are stored in the `stats` collection and also returned as an enriched RPC response.
-
-### A. Stored Format (`stats` collection, key: `player_stats`)
-
-```json
-{
+  "name": "Rain",
   "rank": 34,
   "xp": 8309,
   "current_nrg": 284,
   "last_nrg_update_time": 1775824657,
+  "gil": 154200,
+  "lapis": 5400,
   "last_entered_mission_id": "1110101"
 }
 ```
+* `max_nrg` and `next_rank_xp` are computed dynamically from static rank tables based on current `rank`.
+* NRG regenerates over real-time intervals (300 seconds = 1 NRG).
 
-### B. RPC Response (`get_player_stats`)
+---
 
-The server computes and appends several fields before returning to the client.
-
-```json
-{
-  "rank": 34,
-  "xp": 8309,
-  "next_rank_xp": 12000,
-  "current_nrg": 284,
-  "max_nrg": 112,
-  "nrg_regen_rate_seconds": 300,
-  "seconds_until_next_nrg": 47.0,
-  "last_entered_mission_id": "1110101"
-}
-```
-
-Notes:
-* `xp` is the player's current accumulated XP toward the next rank.
-* `next_rank_xp` is the XP threshold required to reach the next rank (computed from static rank data, not stored).
-* `max_nrg` is derived from the player's current rank via static rank data (not stored).
-* `nrg_regen_rate_seconds` is a server constant (300s = 5 minutes per NRG point).
-* `last_nrg_update_time` is stored in DB for server-side regen calculations but not sent to the client.
-
-## 7. Saved Player Parties (Parties)
-
-Player's parties are saved globally as an object in the `user_data` collection.
-
-* **Collection:** `"user_data"`
-* **Key:** `"parties"`
+### B. Player Units (`units.json`)
+Managed by `UnitService`. Maps each unique `instance_id` to its owned unit state:
 
 ```json
 {
-  "selected_party_index": 0,
-  "parties": [
-    {
-      "name": "Party 1",
-      "units": [
-        "b019e4b9-96a5-4f2a-a664-b746b885fd26", // Unique UUID for the player's specific unit
-        "03d04f22-4a0d-48ff-b93f-62a1f2210365",
-        "10a17f72-ef1a-40e8-abad-902fd7126b85",
-        "",
-        ""
-      ]
+  "b019e4b9-96a5-4f2a-a664-b746b885fd26": {
+    "instance_id": "b019e4b9-96a5-4f2a-a664-b746b885fd26",
+    "unit_id": "100000102",
+    "level": 35,
+    "xp": 14200,
+    "current_rarity": 4,
+    "trust_value": 45.2,
+    "limitburst_level": 5,
+    "limitburst_xp": 240,
+    "is_locked": true,
+    "equipment": {
+      "r_hand": "uuid-weapon-1",
+      "l_hand": "uuid-shield-1",
+      "head": "uuid-helm-1",
+      "body": "uuid-armor-1",
+      "accessory1": "uuid-acc-1",
+      "accessory2": "",
+      "materia1": "uuid-mat-1",
+      "materia2": "",
+      "materia3": "",
+      "materia4": ""
     }
-  ]
-}
-```
-
-## 8. Saved Mission Progress (Mission Clears)
-
-Mission clear progress is saved globally as an object in a dedicated mission progress collection.
-
-* **Collection**: `mission_progress`
-* **Key**: `cleared_missions`
-
-```json
-{
-  "mission_1110101": {
-    "cleared": true,
-    "objectives": [true, true, true]
   }
 }
 ```
 
-Notes:
-* Key format is `mission_<mission_id>`.
-* On first successful clear only, server grants mission-level `rewards` and optional objective rewards.
-* Current temporary behavior marks all 3 optional objectives complete on first clear.
+---
 
-## 9. Saved Combat Items (Combat Item Slots)
+### C. Player Inventory (`items.json`)
+Managed by `InventoryService` using a hybrid model:
 
-The player's active combat item loadout is stored in the `user_data` collection.
+```json
+{
+  "stackables": {
+    "item_potion_01": 25,
+    "item_ether_01": 10,
+    "mat_iron_ore": 99,
+    "mat_lapis_crystal": 5
+  },
+  "equipment": [
+    {
+      "instance_id": "uuid-weapon-1",
+      "template_id": "301000200",
+      "equipped_to": "b019e4b9-96a5-4f2a-a664-b746b885fd26"
+    },
+    {
+      "instance_id": "uuid-weapon-2",
+      "template_id": "301000200",
+      "equipped_to": null
+    }
+  ]
+}
+```
+* **Stackables (Fungible)**: Directly mapped as `template_id -> quantity`.
+* **Equipment (Non-Fungible)**: Each item possesses a unique `instance_id` and tracks its `equipped_to` unit binding.
 
-* **Collection:** `"user_data"`
-* **Key:** `"combat_items"`
+---
+
+### D. Combat Item Loadout (`combat_items.json`)
+Managed by `CombatItemsService`:
 
 ```json
 {
   "slots": [
     "item_potion_01",
     "item_hi_potion_01",
-    "",
+    "item_ether_01",
     "",
     "",
     "",
@@ -260,8 +210,196 @@ The player's active combat item loadout is stored in the `user_data` collection.
   ]
 }
 ```
+* Fixed-length array of 10 slots available in battle menus. Empty slots are represented by `""`.
 
-Notes:
-* `slots` is always a fixed-length array of 10 elements (defined by `COMBAT_ITEM_SLOT_COUNT` in `data_manager.gd`).
-* Each slot holds a stackable item template ID string, or `""` for an empty slot.
-* Only stackable items the player currently owns (quantity > 0) are valid for combat slots.
+---
+
+### E. Party Composition (`parties.json`)
+Managed by `PartyService`:
+
+```json
+{
+  "selected_party_index": 0,
+  "parties": [
+    {
+      "name": "Party 1",
+      "units": [
+        "b019e4b9-96a5-4f2a-a664-b746b885fd26",
+        "03d04f22-4a0d-48ff-b93f-62a1f2210365",
+        "10a17f72-ef1a-40e8-abad-902fd7126b85",
+        "",
+        ""
+      ],
+      "espers": [
+        "1",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
+```
+* Contains up to 5 party decks. Slots contain unit instance UUIDs and equipped esper IDs.
+
+---
+
+### F. Espers (`espers.json`)
+Managed by `EsperService`:
+
+```json
+{
+  "1": {
+    "esper_id": "1",
+    "tier": 1,
+    "level": 25,
+    "xp": 3400,
+    "sp_remaining": 120,
+    "unlocked_nodes": [1, 2, 5, 8]
+  }
+}
+```
+
+---
+
+### G. Mission Progress (`mission_progress.json`)
+Managed by `MissionService`:
+
+```json
+{
+  "cleared_missions": {
+    "1110101": {
+      "cleared": true,
+      "objectives": [true, true, true]
+    }
+  }
+}
+```
+* Tracks cleared status and challenge objectives (star missions) per mission ID.
+
+---
+
+### H. Story & Quest Switches (`switches.json`)
+Managed by `StoryFlow` and `EventPlayer`:
+
+```json
+{
+  "19100010": 1,
+  "19100011": 0,
+  "19100012": 1
+}
+```
+* Bitflags and trigger conditions governing story progression, NPC dialog variants, and world map unlocks.
+
+---
+
+## 3. Combat Event Log Schema (`BattleEventLog`)
+
+During combat simulation, the `BattleEngine` emits immutable event records consumed by the UI. Key events include:
+
+### `HIT_LANDED`
+```json
+{
+  "action": 101,
+  "actor": 0,
+  "target": 10,
+  "amount": 1250,
+  "absorbed": 250,
+  "hp_lost": 1000,
+  "hp": 3750,
+  "max_hp": 5000,
+  "chain": 3,
+  "chain_pct": 130,
+  "spark": false,
+  "element_chain": 1
+}
+```
+* `absorbed`: Damage absorbed by an active barrier (`BattleStatus.SHIELD`), triggering "ABSORB" floating callout.
+
+### `LB_CRYSTAL_DROPPED`
+```json
+{
+  "source": 10,
+  "target": 0,
+  "amount": 100,
+  "lb": 600,
+  "max_lb": 800
+}
+```
+
+### `ESPER_ORB_DROPPED`
+```json
+{
+  "source": 10,
+  "actor": 0,
+  "amount": 1,
+  "orbs": 4,
+  "max_orbs": 10
+}
+```
+
+### `STATUS_ADDED`
+```json
+{
+  "action": 102,
+  "actor": 0,
+  "target": 10,
+  "kind": "ailment",
+  "key": "SLEEP",
+  "value": 0,
+  "turns": 3
+}
+```
+* Triggers color-coded floating callout (e.g. "SLEEP", "BARRIER", "ATK UP"), sprite tint & pause, and unit panel / enemy target bar icon.
+
+### `STATUS_REMOVED`
+```json
+{
+  "target": 10,
+  "kind": "ailment",
+  "key": "SLEEP",
+  "value": 0,
+  "reason": "damaged"
+}
+```
+* Common `reason` values: `"damaged"` ("WAKE" callout), `"broken"` ("BARRIER BREAK" callout), `"cured"` ("CURED" callout), `"expired"`.
+
+### `STATUS_RESISTED`
+```json
+{
+  "action": 102,
+  "actor": 0,
+  "target": 10,
+  "kind": "ailment",
+  "key": "POISON",
+  "reason": "resisted"
+}
+```
+* Triggers "RESIST" floating callout.
+
+---
+
+## 4. Item Drop & Town Store Lookup (`GameDatabase.get_item_drop_locations`)
+
+Provides relational lookup for material items across datamined tables (`monster_parts`, `mission_phase`, `battle_group`, `battle_lottery`, `mission`, `dungeon`, `store_item`, `town_store`, `town`):
+
+```json
+{
+  "dungeons": [
+    {
+      "dungeon_name": "Earth Shrine",
+      "mission_name": "Entrance",
+      "land_name": "Grandshelt"
+    }
+  ],
+  "shops": [
+    {
+      "shop_name": "Provisions Store",
+      "town_name": "Royal Capital Grandshelt",
+      "land_name": "Grandshelt"
+    }
+  ]
+}
+```
+* Displayed in `ItemDropPopup.tscn` when clicking the magnifying glass (`unit_classup_item_search_on`) in Unit Awakening (`unit_awakening.gd`) and Ability Awakening (`ability_awakening.gd`).

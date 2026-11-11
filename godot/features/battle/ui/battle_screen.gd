@@ -1,6 +1,8 @@
 class_name BattleScreen
 extends Control
 
+const BattleStatusIconHelper = preload("res://features/battle/ui/battle_status_icon_helper.gd")
+
 ## The battle scene's root (BattleUI.tscn), on the new engine. It starts the battle
 ## through %BattleDirector, hands every engine event to the screen's areas, turns the
 ## player's gestures into session commands, runs auto battle, Reload and Repeat, and
@@ -16,7 +18,11 @@ extends Control
 
 const MissionResultScene: PackedScene = preload("res://features/battle/ui/MissionResultSequence.tscn")
 const BATTLE_END_MUSIC: String = "res://assets/audio/bgm/la009_battleend.wav"
+## A defeat gets its own theme: the clear fanfare reads as a reward, and the
+## result screen behind "Mission Failed!" must not sound like a win.
+const BATTLE_DEFEAT_MUSIC: String = "res://assets/audio/bgm/la01101_bgm_ff8_DeadEnd.wav"
 const COLOSSEUM_BACKGROUND: String = "Colosseum.jpg"
+const EsperPresentationScript = preload("res://features/battle/ui/esper_summon_presentation.gd")
 
 @onready var session: BattleSession = %BattleSession
 @onready var director: BattleDirector = %BattleDirector
@@ -30,10 +36,15 @@ const COLOSSEUM_BACKGROUND: String = "Colosseum.jpg"
 @onready var auto_button: TextureButton = $VisualLayer/CommandButtons/AutoButtonDecor
 @onready var repeat_button: TextureButton = $VisualLayer/CommandButtons/MemoryButtonDecor
 @onready var reload_button: TextureButton = %ReloadButtonDecor
+@onready var menu_button: TextureButton = $VisualLayer/CommandButtons/MenuButtonDecor
 @onready var limit_crystal: AnimatedSprite2D = $BattleLimitCrystal
 
 var hud: BattleHud
 var dialogue: BattleDialogue
+## The panel the square MENU button opens, built here (BattleMenuScreen.new()).
+var battle_menu: BattleMenuScreen
+## Parameters passed when opening this combat scene
+var _scene_params: Dictionary = {}
 ## Plays a cutscene the director asks for: Callable(story_event_id: String, mission_id:
 ## String) -> the next location it named (Dictionary), awaitable. StoryFlow by default;
 ## tests answer at once.
@@ -41,6 +52,8 @@ var cutscene_player: Callable
 
 ## The enemy the player's attacks go to (-1 when none is standing).
 var _target_enemy_id: int = -1
+
+
 ## A skill or item waiting for its ally pick: { unit_id, command, multicast }, the last
 ## true for a pick of the multicast draft.
 var _pending: Dictionary = {}
@@ -51,6 +64,9 @@ var _draft: Dictionary = {}
 ## others where the events left them.
 var _pools: Dictionary = {}
 var _failure_shown: bool = false
+var _esper_presentation: Variant
+var _esper_visual_finished: Dictionary = {}
+var _esper_action_ended: Dictionary = {}
 
 
 func _ready() -> void:
@@ -64,6 +80,10 @@ func _ready() -> void:
 	party_field.crystal_template = limit_crystal
 	dialogue = BattleDialogue.new()
 	add_child(dialogue)
+	_esper_presentation = EsperPresentationScript.new()
+	_esper_presentation.name = "EsperSummonPresentation"
+	add_child(_esper_presentation)
+	_esper_presentation.sequence_finished.connect(_on_esper_sequence_finished)
 	if not cutscene_player.is_valid():
 		cutscene_player = _play_story_event
 
@@ -86,6 +106,11 @@ func _ready() -> void:
 	menus.ally_picked.connect(_on_ally_picked)
 	menus.ally_pick_cancelled.connect(_on_ally_pick_cancelled)
 	menus.menu_dismissed.connect(_drop_draft)
+	battle_menu = BattleMenuScreen.new()
+	battle_menu.name = "BattleMenuScreen"
+	add_child(battle_menu)
+	battle_menu.command_chosen.connect(_on_battle_menu_command)
+	menu_button.pressed.connect(_open_battle_menu)
 
 	finish_button.pressed.connect(_on_finish_pressed)
 	rewards_popup.confirmed.connect(_on_rewards_confirmed)
@@ -113,6 +138,7 @@ func _exit_tree() -> void:
 
 
 func init_scene(params: Dictionary) -> void:
+	_scene_params = params
 	# One frame first, so a caller's loading overlay can render before the work.
 	await get_tree().process_frame
 	_apply_battle_background(str(params.get("mission_id", "")))
@@ -135,6 +161,8 @@ func _apply_battle_background(mission_id: String) -> void:
 ## A new battle: the party's panels and sprites (for the whole battle) and the first
 ## wave's enemies, before the start events arrive.
 func _on_battle_started(engine: BattleEngine) -> void:
+	if battle_menu.is_open():
+		battle_menu.close()
 	_target_enemy_id = -1
 	_pending = {}
 	_draft = {}
@@ -185,7 +213,7 @@ func _retarget(engine: BattleEngine) -> void:
 func _set_target(foe: Combatant) -> void:
 	_target_enemy_id = foe.id
 	enemy_field.set_target(foe.id)
-	hud.show_target(foe.name, foe.hp, foe.max_hp)
+	hud.show_target(foe.name, foe.hp, foe.max_hp, foe.statuses)
 
 
 ## The unit's sprite scale: the third field of its spriteOffset, in percent.
@@ -226,14 +254,26 @@ func _handle(engine: BattleEngine, event: Dictionary) -> void:
 			_on_command_queued(engine, event)
 		BattleEventLog.ACTION_STARTED:
 			_on_action_started(engine, event)
+		BattleEventLog.ACTION_ENDED:
+			_on_action_ended(engine, event)
 		BattleEventLog.HIT_LANDED:
 			_on_hit(engine, event)
+		BattleEventLog.HIT_MISSED:
+			_on_hit_missed(engine, event)
 		BattleEventLog.RESTORED:
-			_on_pools(engine, int(event["target"]), event.get("hp_now"), event.get("mp_now"), null)
+			_on_restored(engine, event)
 		BattleEventLog.REVIVED:
 			_on_revived(engine, event)
 		BattleEventLog.STATUS_DAMAGE:
-			_on_pools(engine, int(event["target"]), event.get("hp"), null, null)
+			var dmg_target_id: int = int(event["target"])
+			var dmg_target: Combatant = engine.combatant(dmg_target_id)
+			var status_dmg: int = int(event.get("amount", 0))
+			if status_dmg > 0 and dmg_target != null:
+				if dmg_target.is_enemy():
+					enemy_field.show_hit(dmg_target_id, status_dmg)
+				else:
+					party_field.show_hit(dmg_target_id, status_dmg)
+			_on_pools(engine, dmg_target_id, event.get("hp"), null, null)
 		BattleEventLog.COST_PAID:
 			_on_pools(engine, int(event["actor"]), event.get("hp"), event.get("mp"), event.get("lb"))
 			hud.set_esper_gauge(int(event.get("orbs", engine.esper_orbs)), engine.rules.esper_gauge_max)
@@ -252,19 +292,19 @@ func _handle(engine: BattleEngine, event: Dictionary) -> void:
 				_refresh_open_menu(engine)
 		BattleEventLog.COMBATANT_DEFEATED:
 			_on_defeated(engine, event)
-		BattleEventLog.STATUS_ADDED, BattleEventLog.STATUS_REMOVED:
-			var fighter: Combatant = engine.combatant(int(event["target"]))
-			if StringName(event.get("kind", &"")) == BattleStatus.AWAY:
-				_on_away(engine, fighter, event["type"] == BattleEventLog.STATUS_ADDED)
-			if fighter != null and fighter.is_party():
-				_show_acted(fighter)
-			if unit_info_popup.visible and unit_info_popup.shown_id == int(event["target"]):
-				unit_info_popup.setup_from_combatant(fighter)
+		BattleEventLog.STATUS_ADDED:
+			_on_status_added(engine, event)
+		BattleEventLog.STATUS_RESISTED:
+			_on_status_resisted(engine, event)
+		BattleEventLog.STATUS_REMOVED:
+			_on_status_removed(engine, event)
 		BattleEventLog.COVER_ACTIVATED:
 			if StringName(event.get("mode", &"")) == &"aoe":
 				party_field.set_covering(int(event["coverer"]), true)
 		BattleEventLog.COVER_ENDED:
 			party_field.set_covering(int(event["coverer"]), false)
+		BattleEventLog.LIBRA_SCANNED:
+			_show_info(int(event["target"]))
 
 
 ## A unit leaves the field (a jump) or comes back: its sprite rises out of sight or drops
@@ -315,15 +355,55 @@ func _on_action_started(engine: BattleEngine, event: Dictionary) -> void:
 		return
 	var kind: int = int(event["kind"])
 	var origin: int = int(event["origin"])
+	var action_id: int = int(event.get("action", -1))
+	if not actor.is_enemy() and kind == BattleCommand.Kind.EVOKE and origin == BattleAction.Origin.COMMAND:
+		var esper_frames: Array = _effect_frames(engine, actor, event)
+		var primary_effect_exists: bool = EsperPresentationScript.is_primary_esper_effect(esper_frames)
+		if EsperPresentationScript.should_fallback(true, primary_effect_exists):
+			_esper_presentation.begin_holding_hits(action_id)
+			var available_frames: Array = EsperPresentationScript.available_effect_frames(esper_frames)
+			var play_available_effects: Callable = func(frames: Array) -> void:
+				party_field.spawn_effects(frames, session.speed)
+			_esper_presentation.enqueue(action_id, int(event.get("esper_id", 0)), available_frames, play_available_effects, session.speed)
+			return
 	if actor.is_enemy():
 		hud.show_feedback("%s - %s" % [actor.name, _action_text(event)])
-		if kind == BattleCommand.Kind.ATTACK:
-			enemy_field.play_attack(actor.id)
+		enemy_field.play_attack(actor.id)
+		var enemy_frames: Array = _effect_frames(engine, actor, event)
+		if not enemy_frames.is_empty():
+			var enemy_target: Combatant = engine.combatant(int(event.get("target", -1)))
+			if enemy_target != null and enemy_target.is_enemy():
+				enemy_field.spawn_effects(enemy_frames, session.speed, enemy_target.id)
+			else:
+				party_field.spawn_effects(enemy_frames, session.speed, enemy_target.id if enemy_target != null else -1)
 		return
 	if kind == BattleCommand.Kind.DEFEND:
 		menus.panel(actor.id).set_acted(true)
 		return
 	hud.show_feedback("%s - %s" % [actor.name, _action_text(event)])
+	# Melee dash: physical basic attack or melee skill approaches the target
+	var target_foe_id: int = int(event.get("target", _target_enemy_id))
+	var target_foe: Combatant = engine.combatant(target_foe_id) if target_foe_id >= 0 else null
+	var is_melee: bool = false
+	if target_foe != null and target_foe.is_enemy():
+		if kind == BattleCommand.Kind.ATTACK:
+			var move_type: int = int(actor.source.get("attackMoveType", 1))
+			is_melee = (move_type == 1)
+		elif kind == BattleCommand.Kind.SKILL:
+			var skill_id: String = str(event.get("executed_skill_id", event.get("skill_id", "")))
+			var ability_data: Dictionary = GameDatabase.get_ability(skill_id)
+			var move_type: int = int(ability_data.get("move_type", 0))
+			is_melee = (move_type == 1)
+
+	if is_melee:
+		var enemy_global: Variant = enemy_field.sprite_position(target_foe_id)
+		if enemy_global != null:
+			var local_target: Vector2 = party_field.get_global_transform().affine_inverse() * (enemy_global as Vector2)
+			var approach_pos: Vector2 = Vector2(local_target.x + 75.0, local_target.y + 15.0)
+			var approach_dur: float = clampf(0.18 / maxf(session.speed, 0.25), 0.05, 0.25)
+			party_field.attack_approach(actor.id, approach_pos, approach_dur)
+		AudioService.play_sfx("res://assets/audio/sfx/se_attack_sword_slash_1.wav")
+
 	# A reaction (a counter, a passive's cast) does not use up the unit's turn; a landing
 	# does.
 	if origin == BattleAction.Origin.REACTION:
@@ -333,23 +413,110 @@ func _on_action_started(engine: BattleEngine, event: Dictionary) -> void:
 	elif origin != BattleAction.Origin.CAST:
 		menus.panel(actor.id).set_acted(true)
 		party_field.play_action(actor.id, _action_pose(kind))
-	if kind != BattleCommand.Kind.ATTACK:
-		party_field.spawn_effects(_effect_frames(engine, actor, event), session.speed)
+	var frames: Array = _effect_frames(engine, actor, event)
+	if not frames.is_empty():
+		var chosen_target: Combatant = engine.combatant(int(event.get("target", -1)))
+		if chosen_target != null and chosen_target.is_enemy():
+			enemy_field.spawn_effects(frames, session.speed, chosen_target.id)
+		elif chosen_target != null and chosen_target.is_party():
+			party_field.spawn_effects(frames, session.speed, chosen_target.id)
+		elif kind == BattleCommand.Kind.ATTACK:
+			enemy_field.spawn_effects(frames, session.speed, _target_enemy_id)
+		else:
+			party_field.spawn_effects(frames, session.speed)
+
+
+func _on_action_ended(_engine: BattleEngine, event: Dictionary) -> void:
+	var actor_id: int = int(event.get("actor", -1))
+	if actor_id >= 0:
+		var return_dur: float = clampf(0.20 / maxf(session.speed, 0.25), 0.05, 0.3)
+		party_field.attack_return(actor_id, return_dur)
+	var action_id: int = int(event.get("action", -1))
+	if _esper_presentation != null and _esper_presentation._held_hits.has(action_id):
+		_esper_action_ended[action_id] = true
+		_finish_esper_presentation_if_ready(action_id)
+
+
+func _on_esper_sequence_finished(action_id: int) -> void:
+	_esper_visual_finished[action_id] = true
+	_finish_esper_presentation_if_ready(action_id)
+
+
+func _finish_esper_presentation_if_ready(action_id: int) -> void:
+	if not _esper_visual_finished.has(action_id) or not _esper_action_ended.has(action_id):
+		return
+	_esper_visual_finished.erase(action_id)
+	_esper_action_ended.erase(action_id)
+	for event in _esper_presentation.release_hits(action_id):
+		_on_hit(session.engine, event)
 
 
 func _on_hit(engine: BattleEngine, event: Dictionary) -> void:
-	hud.set_chain(int(event.get("chain", 0)))
+	if _esper_presentation != null and _esper_presentation.hold_hit(int(event.get("action", -1)), event):
+		return
 	var target: Combatant = engine.combatant(int(event["target"]))
+	var amount: int = int(event.get("amount", 0))
+	var absorbed: int = int(event.get("absorbed", 0))
+	var hp_lost: int = int(event.get("hp_lost", amount))
+	var hp_after: int = int(event.get("hp", 1))
+	var chain: int = int(event.get("chain", 0))
+	var spark: bool = bool(event.get("spark", false))
+	var element_chain: int = int(event.get("element_chain", 0))
+	var magic: bool = int(event.get("attack_type", 0)) == BattleSkill.ATTACK_MAGIC
+	var overkill: bool = amount > 0 and hp_after == 0 and (amount - absorbed) > hp_lost
+	hud.record_hit(amount, chain, spark, element_chain, target != null and target.is_enemy())
+	if spark or bool(event.get("critical", false)):
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_critical.wav")
+	elif chain > 1 and element_chain > 0:
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_chain_element.wav")
+	elif chain > 1:
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_chain_normal.wav")
+	else:
+		AudioService.play_sfx("res://assets/audio/sfx/se_seiken_atk_sword_hit.wav")
 	if target == null:
 		return
-	var amount: int = int(event.get("amount", 0))
+	if absorbed > 0:
+		if target.is_enemy():
+			enemy_field.show_status_text(target.id, "ABSORB", Color(1.0, 0.85, 0.2))
+		else:
+			party_field.show_status_text(target.id, "ABSORB", Color(1.0, 0.85, 0.2))
 	if target.is_enemy():
-		enemy_field.show_hit(target.id, amount)
+		enemy_field.show_hit(target.id, amount, overkill, spark, magic)
 		if target.id == _target_enemy_id:
-			hud.show_target(target.name, int(event["hp"]), int(event["max_hp"]))
+			hud.show_target(target.name, int(event["hp"]), int(event["max_hp"]), target.statuses)
 	else:
-		party_field.show_hit(target.id, amount)
+		party_field.show_hit(target.id, amount, overkill, spark, magic)
 		_on_pools(engine, target.id, event.get("hp"), null, null)
+
+
+func _on_hit_missed(engine: BattleEngine, event: Dictionary) -> void:
+	var target: Combatant = engine.combatant(int(event.get("target", -1)))
+	if target == null:
+		return
+	var reason: StringName = StringName(event.get("reason", &""))
+	if reason == &"target_down" and target.is_enemy():
+		enemy_field.show_overkill(target.id)
+	elif reason in [&"dodged", &"evaded", &"missed", &"blinded"]:
+		var callout: String = "DODGE" if reason in [&"dodged", &"evaded"] else "MISS"
+		if target.is_enemy():
+			enemy_field.show_miss(target.id, callout)
+		else:
+			party_field.show_miss(target.id, callout)
+
+
+func _on_restored(engine: BattleEngine, event: Dictionary) -> void:
+	var target_id: int = int(event["target"])
+	_on_pools(engine, target_id, event.get("hp_now"), event.get("mp_now"), null)
+	var gained_hp: int = int(event.get("hp", 0))
+	if gained_hp <= 0:
+		return
+	var target: Combatant = engine.combatant(target_id)
+	if target == null:
+		return
+	if target.is_enemy():
+		enemy_field.show_heal(target.id, gained_hp)
+	else:
+		party_field.show_heal(target.id, gained_hp)
 
 
 func _on_revived(engine: BattleEngine, event: Dictionary) -> void:
@@ -370,7 +537,7 @@ func _on_defeated(engine: BattleEngine, event: Dictionary) -> void:
 	if fighter == null:
 		return
 	if fighter.is_enemy():
-		enemy_field.play_death(fighter.id)
+		enemy_field.play_death(fighter.id, fighter.is_boss)
 		if fighter.id == _target_enemy_id:
 			_retarget(engine)
 	else:
@@ -385,7 +552,9 @@ func _on_crystal(engine: BattleEngine, event: Dictionary) -> void:
 	if member == null:
 		return
 	var lb: int = int(event.get("lb", member.lb))
-	var land: Callable = func() -> void: _on_pools(engine, member.id, null, null, lb)
+	var land: Callable = func() -> void:
+		AudioService.play_sfx("res://assets/audio/sfx/se_battle_get_crystal_1.wav")
+		_on_pools(engine, member.id, null, null, lb)
 	var start: Variant = enemy_field.sprite_position(int(event["source"]))
 	if start == null:
 		land.call()
@@ -401,7 +570,8 @@ func _on_pools(engine: BattleEngine, fighter_id: int, hp: Variant, mp: Variant, 
 		return
 	if fighter.is_enemy():
 		if fighter.id == _target_enemy_id and hp != null:
-			hud.show_target(fighter.name, int(hp), fighter.max_hp)
+			hud.show_target(fighter.name, int(hp), fighter.max_hp, fighter.statuses)
+		enemy_field.update_status_visual(fighter.id, fighter.statuses)
 		return
 	var shown: Array = _pools.get(fighter.id, [fighter.hp, fighter.mp, fighter.lb])
 	if hp != null:
@@ -419,7 +589,12 @@ func _show_pools(member: Combatant) -> void:
 	var panel: UnitPanel = menus.panel(member.id)
 	if panel != null:
 		panel.show_stats(member.name, shown[0], member.max_hp, shown[1], member.max_mp, shown[2], member.max_lb)
+		var barrier: BattleStatus = member.find_status(BattleStatus.SHIELD)
+		var barrier_pct: float = float(barrier.value) / float(member.max_hp) if (barrier != null and member.max_hp > 0) else 0.0
+		panel.set_barrier_gauge(barrier_pct)
+		panel.set_statuses(member.statuses)
 	party_field.set_hp(member.id, shown[0], member.max_hp)
+	party_field.update_status_visual(member.id, member.statuses)
 
 
 ## Greyed when the member has acted, is KO'd or cannot take commands (sleep, stop, in the
@@ -429,6 +604,86 @@ func _show_acted(member: Combatant) -> void:
 	if panel != null:
 		var landing: bool = session.engine != null and session.engine.landing_ready(member)
 		panel.set_acted(member.acted or not member.is_alive() or (not member.can_take_commands() and not landing))
+
+
+func _on_status_added(engine: BattleEngine, event: Dictionary) -> void:
+	var fighter: Combatant = engine.combatant(int(event["target"]))
+	var kind: StringName = StringName(event.get("kind", &""))
+	var key: String = str(event.get("key", ""))
+	var val: int = int(event.get("value", 0))
+
+	if kind == BattleStatus.AWAY:
+		_on_away(engine, fighter, true)
+
+	var callout: Dictionary = BattleStatusIconHelper.get_callout(kind, key, val)
+	if not callout.is_empty() and fighter != null:
+		if fighter.is_enemy():
+			enemy_field.show_status_text(fighter.id, callout["text"], callout["color"])
+		else:
+			party_field.show_status_text(fighter.id, callout["text"], callout["color"])
+
+	if fighter != null:
+		if fighter.is_party():
+			_show_pools(fighter)
+			_show_acted(fighter)
+		else:
+			enemy_field.update_status_visual(fighter.id, fighter.statuses)
+			if fighter.id == _target_enemy_id:
+				hud.show_target(fighter.name, fighter.hp, fighter.max_hp, fighter.statuses)
+
+	if unit_info_popup.visible and unit_info_popup.shown_id == int(event["target"]):
+		unit_info_popup.setup_from_combatant(fighter)
+
+
+func _on_status_resisted(engine: BattleEngine, event: Dictionary) -> void:
+	var fighter: Combatant = engine.combatant(int(event["target"]))
+	if fighter != null:
+		if fighter.is_enemy():
+			enemy_field.show_status_text(fighter.id, "RESIST", Color(0.85, 0.9, 1.0))
+		else:
+			party_field.show_status_text(fighter.id, "RESIST", Color(0.85, 0.9, 1.0))
+
+
+func _on_status_removed(engine: BattleEngine, event: Dictionary) -> void:
+	var fighter: Combatant = engine.combatant(int(event["target"]))
+	var kind: StringName = StringName(event.get("kind", &""))
+	var reason: StringName = StringName(event.get("reason", &""))
+
+	if kind == BattleStatus.AWAY:
+		_on_away(engine, fighter, false)
+
+	if fighter != null:
+		if kind == BattleStatus.SHIELD and reason == &"broken":
+			var col := Color(1.0, 0.5, 0.2)
+			if fighter.is_enemy():
+				enemy_field.show_status_text(fighter.id, "BARRIER BREAK", col)
+			else:
+				party_field.show_status_text(fighter.id, "BARRIER BREAK", col)
+		elif kind == BattleStatus.AILMENT:
+			if reason == &"damaged":
+				var col := Color(0.5, 0.8, 1.0)
+				if fighter.is_enemy():
+					enemy_field.show_status_text(fighter.id, "WAKE", col)
+				else:
+					party_field.show_status_text(fighter.id, "WAKE", col)
+			elif reason == &"cured":
+				var col := Color(0.4, 1.0, 0.4)
+				if fighter.is_enemy():
+					enemy_field.show_status_text(fighter.id, "CURED", col)
+				else:
+					party_field.show_status_text(fighter.id, "CURED", col)
+
+	if fighter != null:
+		if fighter.is_party():
+			_show_pools(fighter)
+			_show_acted(fighter)
+		else:
+			enemy_field.update_status_visual(fighter.id, fighter.statuses)
+			if fighter.id == _target_enemy_id:
+				hud.show_target(fighter.name, fighter.hp, fighter.max_hp, fighter.statuses)
+
+	if unit_info_popup.visible and unit_info_popup.shown_id == int(event["target"]):
+		unit_info_popup.setup_from_combatant(fighter)
 
 
 ## "Attack", or the skill's name ("Skill" or "Item" when it has none).
@@ -499,11 +754,12 @@ static func _action_pose(kind: int) -> CombatSprite.AnimState:
 ## The effects of the skill an ACTION_STARTED names (its record's effect_frames), or of
 ## the ability it runs when the record has none (a cooldown wrapper).
 static func _effect_frames(engine: BattleEngine, actor: Combatant, event: Dictionary) -> Array:
+	var kind: int = int(event["kind"])
 	var skill_id: String = str(event.get("skill_id", ""))
 	var skill: BattleSkill = null
-	if int(event["kind"]) == BattleCommand.Kind.LIMIT_BURST:
+	if kind == BattleCommand.Kind.LIMIT_BURST:
 		skill = engine.catalog.get_limit_burst(skill_id, actor.limit_burst_level)
-	else:
+	elif skill_id != "":
 		skill = engine.catalog.get_skill(StringName(event.get("skill_kind", &"")), skill_id)
 	var frames: Array = skill.record.get("effect_frames", []) if skill != null else []
 	var executed_id: String = str(event.get("executed_skill_id", ""))
@@ -511,18 +767,75 @@ static func _effect_frames(engine: BattleEngine, actor: Combatant, event: Dictio
 		var executed: BattleSkill = engine.catalog.get_skill(BattleSkill.KIND_ABILITY, executed_id)
 		if executed != null:
 			frames = executed.record.get("effect_frames", [])
+	if frames.is_empty() and kind == BattleCommand.Kind.ATTACK and actor != null:
+		var raw_frames: String = str(actor.source.get("effectFrames", ""))
+		if raw_frames != "":
+			frames = GameDatabase._decode_effect_frames(raw_frames)
 	return frames
+
+
+# === The battle menu ===
+
+## The square MENU button: the panel over the field, drawn from the battle as it is now.
+## Not while an ally is being picked: the Cancel Target button would sit under it.
+func _open_battle_menu() -> void:
+	if battle_menu.is_open() or menus.is_picking_ally():
+		return
+	AudioService.play_ui("res://assets/audio/sfx/se_battle_decide_1.wav")
+	battle_menu.set_members(BattleMenuModel.members(session.engine))
+	battle_menu.open(BattleMenuModel.commands(director, session.engine))
+
+
+## Each command already had a home in the battle.
+func _on_battle_menu_command(command: StringName) -> void:
+	match command:
+		BattleMenuModel.CMD_GIVE_UP:
+			battle_menu.close()
+			AudioService.play_ui("res://assets/audio/sfx/se_battle_escape_1.wav")
+			director.give_up()
+		BattleMenuModel.CMD_REPEAT_INFO:
+			_show_repeat_info()
+
+
+## Repeat's memory, listed: the units that would act again this turn, by name. Reads the
+## same BattleCommandMenu.restore_command Reload queues from, and queues nothing.
+func _show_repeat_info() -> void:
+	var names: Array[String] = []
+	var engine: BattleEngine = session.engine
+	battle_menu.close()
+	if engine != null and engine.phase != BattleEngine.Phase.PLAYER:
+		hud.show_feedback("Repeat: %s" % BattleMenuModel.REASON_NOT_PLAYER_TURN)
+		return
+	if engine != null:
+		for unit in engine.units_to_act():
+			if BattleCommandMenu.restore_command(engine, unit) != null:
+				names.append(unit.name)
+	if names.is_empty():
+		hud.show_feedback("Repeat: nothing to remember yet")
+		return
+	hud.show_feedback("Repeat: %s" % ", ".join(names))
+
+
+## The menu covers the field, so a gesture it never saw (a key, a pad) must still not
+## reach the battle behind it.
+func _battle_menu_open() -> bool:
+	return battle_menu != null and battle_menu.is_open()
 
 
 # === Input ===
 
 func _on_command_chosen(unit_id: int, command: StringName) -> void:
+	if _battle_menu_open():
+		return
 	session.queue_command(unit_id, BattleCommand.defend() if command == UnitPanel.DEFEND else BattleCommand.attack())
 
 
 ## A tap on a panel: the unit acts, at the chosen enemy when its command aims at the
 ## other side or nothing is queued (a basic attack).
 func _execute_unit(unit_id: int) -> void:
+	if _battle_menu_open():
+		return
+	AudioService.play_ui("res://assets/audio/sfx/se_battle_decide_1.wav")
 	_aim(unit_id)
 	session.execute(unit_id)
 
@@ -542,6 +855,8 @@ func _aim(unit_id: int) -> void:
 
 
 func _on_enemy_tapped(enemy_id: int) -> void:
+	if _battle_menu_open():
+		return
 	if menus.is_picking_ally():
 		menus.cancel_ally_pick()
 		return
@@ -560,6 +875,8 @@ func _show_info(fighter_id: int) -> void:
 
 
 func _open_skill_menu(unit_id: int) -> void:
+	if _battle_menu_open():
+		return
 	var unit: Combatant = session.engine.combatant(unit_id)
 	_draft = {}
 	if unit != null:
@@ -567,6 +884,8 @@ func _open_skill_menu(unit_id: int) -> void:
 
 
 func _open_item_menu(unit_id: int) -> void:
+	if _battle_menu_open():
+		return
 	var unit: Combatant = session.engine.combatant(unit_id)
 	if unit != null:
 		menus.show_item_menu(unit_id, BattleCommandMenu.item_options(session.engine, unit))
@@ -692,6 +1011,9 @@ func _cancel_pick() -> void:
 func _on_auto_toggled(enabled: bool) -> void:
 	if not enabled:
 		return
+	if _battle_menu_open():
+		auto_button.set_pressed_no_signal(false)
+		return
 	if menus.is_picking_ally() or not _draft.is_empty():
 		auto_button.set_pressed_no_signal(false)
 		return
@@ -794,7 +1116,7 @@ func _on_mission_failed(error_msg: String = "") -> void:
 		return
 	_failure_shown = true
 	print("Failed to complete mission: %s" % error_msg)
-	AudioService.play_music(BATTLE_END_MUSIC, false)
+	AudioService.play_music(BATTLE_DEFEAT_MUSIC, false)
 	rewards_popup.dialog_text = "Mission Failed!"
 	rewards_popup.popup_centered()
 
@@ -807,10 +1129,14 @@ func _on_rewards_confirmed() -> void:
 ## back to the map, or where the mission's scenes led (the prologue leads into the
 ## Earth Shrine).
 func _on_result_sequence_finished() -> void:
+	var is_recollect: bool = bool(_scene_params.get("is_recollection", false))
+	var on_finish_cb: Callable = _scene_params.get("on_finished", Callable())
 	var next: Dictionary = director.next_location
 	var after_clear: Dictionary = await StoryFlow.play_scenes(StoryFlow.after_clear_scenes(director.mission_id))
 	if not after_clear.is_empty():
 		next = after_clear
 	UIManager.pop()
-	if not next.is_empty():
+	if on_finish_cb.is_valid():
+		on_finish_cb.call()
+	elif not is_recollect and not next.is_empty():
 		StoryFlow.go_to(next)

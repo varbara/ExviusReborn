@@ -14,86 +14,47 @@ grow_vertical = 2
 script = ExtResource("1_script")
 
 [node name="GachaCosmosBg" type="Sprite2D" parent="." unique_id=1996293765]
-position = Vector2(320, 572)
+position = Vector2(320, 420)
 texture = ExtResource("2_roeup")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=52421160]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -200.0
-offset_right = 200.0
-offset_bottom = 200.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="TitleLabel" type="Label" parent="VBoxContainer" unique_id=2081797486]
-layout_mode = 2
-text = "Summon"
-horizontal_alignment = 1
-
-[node name="SummonButtonsRow" type="VBoxContainer" parent="VBoxContainer" unique_id=126392501]
-layout_mode = 2
-
-[node name="PerformSummonButton" type="Button" parent="VBoxContainer/SummonButtonsRow" unique_id=216101240]
-layout_mode = 2
-text = "Summon 10+1 Units"
-
-[node name="PerformNVSummonButton" type="Button" parent="VBoxContainer/SummonButtonsRow" unique_id=1059379328]
-layout_mode = 2
-text = "(NV) Summon 10+1 Units"
-
-[node name="GetCactuarButton" type="Button" parent="VBoxContainer/SummonButtonsRow" unique_id=145641716]
-layout_mode = 2
-text = "Get Cactuar"
-
-[node name="GetMoogleButton" type="Button" parent="VBoxContainer/SummonButtonsRow" unique_id=1666816215]
-layout_mode = 2
-text = "Get Moogle"
-
-[node name="SummonOverlay" type="ColorRect" parent="." unique_id=1647780593]
-visible = false
+[node name="BannerView" type="Control" parent="." unique_id=52421160]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_bottom = -110.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0, 0, 0, 0.8)
 
-[node name="VBoxContainer" type="VBoxContainer" parent="SummonOverlay" unique_id=201311344]
+[node name="RevealOverlay" type="Control" parent="." unique_id=1647780593]
+visible = false
+z_index = 100
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -320.0
-offset_top = -210.0
-offset_right = 320.0
-offset_bottom = 250.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -120.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="TitleLabel" type="Label" parent="SummonOverlay/VBoxContainer" unique_id=1792991688]
-layout_mode = 2
-text = "Units Obtained"
-horizontal_alignment = 1
+[node name="ResultsOverlay" type="Control" parent="." unique_id=201311344]
+visible = false
+z_index = 100
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -120.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="ScrollContainer" type="ScrollContainer" parent="SummonOverlay/VBoxContainer" unique_id=814462950]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="ResultsListContainer" type="GridContainer" parent="SummonOverlay/VBoxContainer/ScrollContainer" unique_id=1458522751]
-layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-columns = 5
-
-[node name="CloseOverlayButton" type="Button" parent="SummonOverlay/VBoxContainer" unique_id=826094200]
-layout_mode = 2
-text = "Close"
+[node name="PoolInfoPopup" type="Control" parent="." unique_id=814462950]
+visible = false
+z_index = 110
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -120.0
+grow_horizontal = 2
+grow_vertical = 2

@@ -138,6 +138,12 @@ func request_finish_mission(win_status: bool, mission_id: String, used_items: Di
 		var award_result: Dictionary = UnitService.award_battle_exp(_active_party_instance_ids(), granted_unit_exp)
 		unit_exp_awards = award_result.get("awarded", [])
 
+	# Battle trust roll (authentic FFBE: 10% chance for +0.1% trust per party member)
+	var trust_awards: Array = []
+	var trust_result: Dictionary = UnitService.award_battle_trust(_active_party_instance_ids())
+	if bool(trust_result.get("success", false)):
+		trust_awards = trust_result.get("awarded", [])
+
 	var owned_items: Dictionary = InventoryService.owned_items
 	for item_id in used_items:
 		var quantity: int = int(used_items[item_id])
@@ -160,6 +166,10 @@ func request_finish_mission(win_status: bool, mission_id: String, used_items: Di
 		rewards_text += "Rank EXP +%s\n" % str(int(mission_data["exp"]))
 	if granted_unit_exp > 0:
 		rewards_text += "Unit EXP +%s\n" % str(granted_unit_exp)
+	for trust_entry in trust_awards:
+		var tmr: Dictionary = trust_entry.get("tmr_granted", {})
+		if not tmr.is_empty():
+			rewards_text += "Trust Mastery Reward Unlocked: %s!\n" % str(tmr.get("template_id", ""))
 
 	var any_switches_unlocked: bool = false
 	if mission_data.has("open_switches"):
@@ -208,6 +218,9 @@ func request_finish_mission(win_status: bool, mission_id: String, used_items: Di
 						else:
 							push_warning("Tried to rank up locked esper %s to rank %d (from switch %s)" % [summon_id, new_rank, switch_id])
 
+	for story_unit in StoryUnitService.take_granted():
+		rewards_text += "New ally: %s joined!\n" % str(story_unit.get("name", story_unit.get("unit_id", "")))
+
 	if not was_already_cleared:
 		var raw_rewards: Variant = mission_data.get("rewards", [])
 		for reward_value in raw_rewards:
@@ -223,6 +236,7 @@ func request_finish_mission(win_status: bool, mission_id: String, used_items: Di
 		"rank_exp": int(mission_data.get("exp", 0)),
 		"unit_exp": granted_unit_exp,
 		"unit_exp_awards": unit_exp_awards,
+		"trust_awards": trust_awards,
 		"gil": granted_gil,
 		"mission_gil": mission_gil,
 		"battle_gil": maxi(0, battle_gil),
@@ -278,6 +292,42 @@ func request_dungeon_missions(mission_ids: Array) -> void:
 
 
 # === Helpers ===
+
+## True when the player has cleared `mission_id` (any objectives).
+func is_mission_cleared(mission_id: String) -> bool:
+	var progress: Variant = cleared_missions.get(str(mission_id), {})
+	if progress is Dictionary:
+		return bool((progress as Dictionary).get("cleared", false))
+	return false
+
+
+## Where a mission sits on the world map, for jumping straight to its dungeon:
+## { ok, world_id, land_id, area_id, dungeon_id, dungeon_name } — `ok` is false
+## when the mission or its location can't be resolved.
+func get_mission_map_target(mission_id: String) -> Dictionary:
+	var mission_key: String = str(mission_id).strip_edges()
+	if mission_key == "":
+		return {"ok": false}
+	var location: Dictionary = GameDatabase.get_mission_location(mission_key)
+	if location.is_empty():
+		return {"ok": false}
+	var world_id: String = str(location.get("worldId", ""))
+	var land_id: String = str(location.get("landId", ""))
+	var area_id: String = str(location.get("areaId", ""))
+	var dungeon_id: String = str(location.get("dungeonId", ""))
+	if world_id == "" or land_id == "" or area_id == "" or dungeon_id == "":
+		return {"ok": false}
+	return {
+		"ok": true,
+		"world_id": world_id,
+		"land_id": land_id,
+		"area_id": area_id,
+		"dungeon_id": dungeon_id,
+		"dungeon_name": GameDatabase.get_dungeon_name(dungeon_id),
+		"dungeon_position": str(location.get("dungeonPosition", "")),
+		"mission_id": mission_key,
+	}
+
 
 func get_mission_data(mission_id: String) -> Dictionary:
 	var mission_key: String = str(mission_id)

@@ -6,10 +6,10 @@
 [ext_resource type="Texture2D" uid="uid://dfit203tpsbps" path="res://assets/ui/common/icon_dia.tres" id="4_earw3"]
 [ext_resource type="Texture2D" uid="uid://cgtsc7k60vulb" path="res://assets/ui/header/mypage_exp_bar.tres" id="5_px8dm"]
 [ext_resource type="Texture2D" uid="uid://dur5l0fvaf3de" path="res://assets/ui/header/mypage_exp_gauge.tres" id="6_hawyt"]
-[ext_resource type="Texture2D" uid="uid://cikwillrit14d" path="res://assets/ui/header/mypage_stamina_info.tres" id="7_u18cj"]
+[ext_resource type="Texture2D" uid="uid://b8h4hs48ciiic" path="res://assets/ui/header/mypage_stamina_info.tres" id="7_u18cj"]
 [ext_resource type="Texture2D" uid="uid://bf0ylx7h6yb08" path="res://assets/ui/header/mypage_stamina_bar.tres" id="8_7281i"]
 [ext_resource type="Texture2D" uid="uid://dico2uxsvgl61" path="res://assets/ui/header/mypage_stamina_gauge.tres" id="9_jv5fp"]
-[ext_resource type="Texture2D" uid="uid://ccmv7yvv3jvg6" path="res://assets/ui/header/mypage_rankup_info.tres" id="10_u18cj"]
+[ext_resource type="Texture2D" uid="uid://fw8eb8oaqivy" path="res://assets/ui/header/mypage_rankup_info.tres" id="10_u18cj"]
 
 [node name="Header" type="Control" unique_id=174978603]
 layout_mode = 3

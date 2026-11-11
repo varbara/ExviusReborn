@@ -77,9 +77,16 @@ func _ready() -> void:
 	_window.patch_margin_bottom = PATCH_MARGIN
 	_window.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_window.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_window.visible = false
 	add_child(_window)
 	_name = _label(NAME_POSITION * ui_scale)
-	_text = _label(TEXT_POSITION * ui_scale)
+	_text = _label(Vector2.ZERO)
+	_text.anchor_left = 0.0
+	_text.anchor_right = 1.0
+	_text.offset_left = TEXT_POSITION.x * ui_scale
+	_text.offset_right = -(CURSOR_MARGIN.x + CURSOR_SIZE.x + 8.0) * ui_scale
+	_text.offset_top = TEXT_POSITION.y * ui_scale
+	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text.add_theme_constant_override("line_spacing", roundi(LINE_SPACING * ui_scale))
 	_cursor = TextureRect.new()
 	_cursor.texture = preload("res://assets/ui/event/talk_cursor.tres")
@@ -169,6 +176,10 @@ func tick() -> void:
 			_shown += text[_char]
 			_char += 1
 			_progress -= 1.0
+			# Immediately consume any following combining marks (Thai vowels/tones)
+			while _char < text.length() and _is_combining_mark(text[_char]):
+				_shown += text[_char]
+				_char += 1
 		_token += 1
 		_char = 0
 	_text.text = _shown
@@ -194,6 +205,8 @@ func cursor_visible() -> bool:
 
 
 func _start_page() -> void:
+	if _window != null:
+		_window.visible = true
 	_token = 0
 	_char = 0
 	_pause = 0
@@ -219,6 +232,16 @@ func _close() -> void:
 	_text.text = ""
 	_name.text = ""
 	_cursor.visible = false
+	if _window != null:
+		_window.visible = false
+
+
+static func _is_combining_mark(c: String) -> bool:
+	if c.is_empty():
+		return false
+	var code: int = c.unicode_at(0)
+	# Thai combining marks: vowels (0x0E31, 0x0E34-0x0E3A) and tone marks/diacritics (0x0E47-0x0E4E)
+	return (code >= 0x0E31 and code <= 0x0E3A) or (code >= 0x0E47 and code <= 0x0E4E)
 
 
 static func _only_waits_from(tokens: Array, from: int) -> bool:

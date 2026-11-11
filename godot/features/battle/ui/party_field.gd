@@ -19,7 +19,7 @@ const COVER_MOVE_SECONDS: float = 0.2
 ## How far a unit in the air (a jump) rises while it fades out, and how long it takes.
 const AWAY_RISE: Vector2 = Vector2(0, -160)
 const AWAY_MOVE_SECONDS: float = 0.25
-const LIMIT_CRYSTAL_SECONDS: float = 0.7
+const LIMIT_CRYSTAL_SECONDS: float = 0.5
 const CRYSTAL_START_OFFSET: Vector2 = Vector2(36, -14)
 const CRYSTAL_END_OFFSET: Vector2 = Vector2(40, 40)
 ## The victory poses give up after this long (a sprite that never reports back: a
@@ -38,6 +38,7 @@ var _damage_containers: Dictionary = {}
 var _dot_homes: Dictionary = {}
 ## Unit id -> its sprite's position before it left the field, for the units in the air.
 var _away: Dictionary = {}
+var _active_tweens: Dictionary = {}
 var _damage_numbers: DamageNumberSpawner
 var _effects: EffectSpawner
 
@@ -57,10 +58,14 @@ func _exit_tree() -> void:
 ## Replaces the sprites with one per member: each { id, slot, template_id (the unit id),
 ## sprite_scale, hp, max_hp }.
 func build(members: Array) -> void:
-	for dot in get_children():
-		for child in dot.get_children():
-			dot.remove_child(child)
+	for child in get_children():
+		if not (child is Control) or not child.name.begins_with("UnitDot"):
+			remove_child(child)
 			child.queue_free()
+			continue
+		for sub in child.get_children():
+			child.remove_child(sub)
+			sub.queue_free()
 	_sprites.clear()
 	_dots.clear()
 	_damage_containers.clear()
@@ -82,6 +87,10 @@ func build(members: Array) -> void:
 		sprite.setup(unit_id, str(member.get("template_id", "")), false)
 		sprite.set_hp(int(member.get("hp", 1)), int(member.get("max_hp", 1)))
 		sprite.long_pressed.connect(unit_long_pressed.emit)
+		sprite.action_finished.connect(func(_idx: int, state: CombatSprite.AnimState) -> void:
+			if state == CombatSprite.AnimState.ATK:
+				attack_return(unit_id)
+		)
 		dot.add_child(sprite)
 
 		var damage := Control.new()
@@ -105,24 +114,84 @@ func play_action(unit_id: int, state: CombatSprite.AnimState) -> void:
 		(_sprites[unit_id] as CombatSprite).play_action(state)
 
 
+## Dashes the unit to target_pos (in party_field local coordinates) over duration seconds.
+func attack_approach(unit_id: int, target_pos: Vector2, duration: float = 0.18) -> void:
+	if not _dots.has(unit_id):
+		return
+	var dot: Control = _dots[unit_id]
+	if _active_tweens.has(unit_id):
+		var old_tw: Variant = _active_tweens[unit_id]
+		if old_tw is Tween and (old_tw as Tween).is_running():
+			(old_tw as Tween).kill()
+	var tw: Tween = create_tween().bind_node(dot)
+	tw.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(dot, "position", target_pos, duration)
+	_active_tweens[unit_id] = tw
+
+
+## Returns the unit from its melee target back to its home dot position.
+func attack_return(unit_id: int, duration: float = 0.22) -> void:
+	if not _dots.has(unit_id):
+		return
+	var dot: Control = _dots[unit_id]
+	var home: Vector2 = _dot_homes.get(dot, dot.position)
+	if dot.position.is_equal_approx(home):
+		return
+	if _active_tweens.has(unit_id):
+		var old_tw: Variant = _active_tweens[unit_id]
+		if old_tw is Tween and (old_tw as Tween).is_running():
+			(old_tw as Tween).kill()
+	var tw: Tween = create_tween().bind_node(dot)
+	tw.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(dot, "position", home, duration)
+	_active_tweens[unit_id] = tw
+
+
 ## The pose for a queued command (STANDBY, MAGIC_STANDBY, IDLE).
 func play_queued(unit_id: int, state: CombatSprite.AnimState) -> void:
 	if _sprites.has(unit_id):
 		(_sprites[unit_id] as CombatSprite).play_queued(state)
 
 
-## A hit: the sprite shakes and the damage floats up.
-func show_hit(unit_id: int, amount: int) -> void:
+## A hit: the sprite shakes, impact VFX plays, and the damage floats up.
+func show_hit(unit_id: int, amount: int, overkill: bool = false, spark: bool = false, magic: bool = false) -> void:
 	if not _sprites.has(unit_id):
 		return
 	BattleTweens.shake(_sprites[unit_id])
-	_damage_numbers.spawn(amount, _damage_containers[unit_id])
+	if _dots.has(unit_id):
+		_effects.spawn_hit_impact(_dots[unit_id], spark, magic)
+	_damage_numbers.spawn(amount, _damage_containers[unit_id], overkill)
 
 
-## A skill's effects (its record's `effect_frames`), in the middle of the field, timed
-## for the battle's `speed`.
-func spawn_effects(effect_frames: Array, speed: float) -> void:
-	_effects.spawn(effect_frames, self, speed)
+func show_heal(unit_id: int, amount: int) -> void:
+	if _damage_containers.has(unit_id):
+		_damage_numbers.spawn_heal(amount, _damage_containers[unit_id])
+
+
+func show_miss(unit_id: int, text: String = "MISS") -> void:
+	if _damage_containers.has(unit_id):
+		_damage_numbers.spawn_status_text(text, _damage_containers[unit_id])
+
+
+func show_status_text(unit_id: int, text: String, color: Color = Color(0.9, 0.95, 1.0, 1.0)) -> void:
+	if _damage_containers.has(unit_id):
+		_damage_numbers.spawn_status_text(text, _damage_containers[unit_id], color)
+
+
+func update_status_visual(unit_id: int, statuses: Array) -> void:
+	if _sprites.has(unit_id):
+		(_sprites[unit_id] as CombatSprite).update_status_visual(statuses)
+
+
+## A skill's effects (its record's `effect_frames`), on `unit_id` or in the middle of the
+## field, timed for the battle's `speed`.
+func spawn_effects(effect_frames: Array, speed: float, unit_id: int = -1) -> void:
+	var target_container: Control = _dots[unit_id] if _dots.has(unit_id) else self
+	_effects.spawn(effect_frames, target_container, speed)
+
+
+func effect_paths() -> Array[String]:
+	return _effects.spawned_paths if _effects != null else ([] as Array[String])
 
 
 ## A limit crystal flies from `from_position` (on screen) to `unit_id`; `on_arrival`
@@ -133,12 +202,15 @@ func fly_crystal(from_position: Vector2, unit_id: int, on_arrival: Callable) -> 
 		return
 	var crystal: AnimatedSprite2D = crystal_template.duplicate()
 	crystal.visible = true
+	crystal.scale = Vector2(1.2, 1.2)
+	crystal.z_index = 80
 	crystal.play()
 	overlay.add_child(crystal)
-	crystal.global_position = from_position + CRYSTAL_START_OFFSET
+	var jitter: Vector2 = Vector2(randf_range(-12.0, 12.0), randf_range(-12.0, 12.0))
+	crystal.global_position = from_position + CRYSTAL_START_OFFSET + jitter
 	var target: Vector2 = (_sprites[unit_id] as Control).global_position + CRYSTAL_END_OFFSET
 	var tween: Tween = create_tween()
-	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(crystal, "global_position", target, LIMIT_CRYSTAL_SECONDS)
 	tween.tween_callback(crystal.queue_free)
 	tween.tween_callback(on_arrival)

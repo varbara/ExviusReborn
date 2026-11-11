@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://b176tp6u5vluf"]
 
 [ext_resource type="Texture2D" uid="uid://bn10qsub3qsex" path="res://assets/ui/item/item_frame_1.tres" id="1_2yv8k"]
+[ext_resource type="Texture2D" uid="uid://xf4eg374qsit" path="res://assets/ui/beast/sumboard_bg.tres" id="2_lo2hk"]
 [ext_resource type="Texture2D" uid="uid://cwy8q4xsyd03" path="res://assets/ui/beast/summon_bait_window.tres" id="1_5mm6n"]
 [ext_resource type="Script" uid="uid://b1o8tjbnds47b" path="res://features/outgame/espers/esper_enhancement_ui.gd" id="1_nj72f"]
 [ext_resource type="Texture2D" uid="uid://s3ibqiyy6qlf" path="res://assets/ui/beast/summon_bait_info.tres" id="2_4cedu"]
@@ -30,6 +31,7 @@
 [ext_resource type="Texture2D" uid="uid://bkqrudjegcb8s" path="res://assets/ui/unit/unit_minibutton1.tres" id="27_ofydn"]
 [ext_resource type="Texture2D" uid="uid://cf7anyq2hby7e" path="res://assets/ui/unit/unit_minibutton2.tres" id="28_38yoq"]
 [ext_resource type="Texture2D" uid="uid://cbjiyj5wwat7a" path="res://assets/ui/beast/summon_cp.tres" id="29_iuegp"]
+[ext_resource type="Texture2D" uid="uid://mqm6ai3hgbdb" path="res://assets/items/item_10700.png" id="30_magicite"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_iuegp"]
 bg_color = Color(1, 0, 0, 0.2)
@@ -42,6 +44,14 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_nj72f")
+
+[node name="summon_board_bg" type="TextureRect" parent="." unique_id=51199357]
+layout_mode = 0
+offset_left = -139.0
+offset_right = 781.0
+offset_bottom = 920.0
+texture = ExtResource("2_lo2hk")
+stretch_mode = 2
 
 [node name="SummonImage" type="TextureRect" parent="." unique_id=1022157186]
 layout_mode = 0
@@ -74,18 +84,17 @@ offset_left = 12.0
 offset_top = 6.0
 offset_right = 52.0
 offset_bottom = 46.0
-texture = ExtResource("1_2yv8k")
+texture = ExtResource("30_magicite")
 expand_mode = 1
 
 [node name="summon_mix_act_item_name" type="Label" parent="summon_mix_act_item_bg" unique_id=1993819088]
 layout_mode = 0
 offset_left = 59.0
 offset_top = 9.0
-offset_right = 371.0
+offset_right = 310.0
 offset_bottom = 43.0
-theme_override_font_sizes/font_size = 22
-text = "summon_mix_act_item_name"
-horizontal_alignment = 1
+theme_override_font_sizes/font_size = 20
+text = "ผลึกเวทมนตร์ (Magicite)"
 vertical_alignment = 1
 
 [node name="summon_mix_bar_area" type="TextureRect" parent="." unique_id=1334470858]
@@ -329,9 +338,28 @@ offset_bottom = 861.0
 position = Vector2(50, 52)
 texture = ExtResource("20_jbu6l")
 
+[node name="ItemIcon" type="Sprite2D" parent="summon_mix_item" unique_id=316027594]
+position = Vector2(50, 52)
+scale = Vector2(0.85, 0.85)
+texture = ExtResource("30_magicite")
+
 [node name="ItemFrame1" type="Sprite2D" parent="summon_mix_item" unique_id=316027593]
 position = Vector2(50, 52)
 texture = ExtResource("1_2yv8k")
+
+[node name="ExpBadge" type="Label" parent="summon_mix_item" unique_id=316027595]
+layout_mode = 0
+offset_left = -10.0
+offset_top = 75.0
+offset_right = 110.0
+offset_bottom = 98.0
+theme_override_colors/font_color = Color(1, 0.95, 0.4, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 14
+text = "+1,000 EXP"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="SummonExpUp" type="Sprite2D" parent="summon_mix_item" unique_id=2091066659]
 position = Vector2(50, -4)

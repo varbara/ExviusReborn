@@ -117,6 +117,7 @@ var map_width: int = 0
 var map_height: int = 0
 var id_map = {}
 var valid_ids = []
+var bg_atlases: Dictionary = {}
 # Maps Vector2i tile coord -> event_id (1=TL-BR stair, 2=BL-TR stair,
 # 3=ladder body, 4=ladder anchor). Rebuilt every chunk redraw and
 # queried by the player controller to constrain movement.
@@ -177,6 +178,7 @@ func _apply_town_paths() -> void:
 	blueprint_path = base + "/map_blueprint.json"
 	_invalidate_blueprint_cache()
 	if is_inside_tree():
+		clear_map_data()
 		# Regenerate the tileset from the new bin's manifest, then redraw.
 		# build_dynamic_tileset() reassigns self.tile_set, replacing
 		# whatever was baked into the scene.
@@ -232,6 +234,7 @@ func show_layer(lid: int) -> bool:
 func read_manifest_from_binary():
 	id_map.clear()
 	valid_ids.clear()
+	bg_atlases.clear()
 	valid_ids.append(10000) # Empty Grass
 	valid_ids.append(65535) # Null/Transparent
 	
@@ -266,6 +269,8 @@ func read_manifest_from_binary():
 		
 		id_map[atlas_id] = godot_id
 		valid_ids.append(atlas_id)
+		if filename.contains("_601") or filename.contains("_602"):
+			bg_atlases[atlas_id] = true
 		
 		print("Assigned ID ", atlas_id, " -> Godot Source: ", godot_id, " (", filename, ")")
 		godot_id += 1
@@ -560,9 +565,25 @@ func get_chunk_data(chunk_index: int) -> Dictionary:
 		return {}
 	return layers[chunk_index]
 
+func clear_map_data() -> void:
+	clear()
+	debug_cells_collision.clear()
+	grid_events_lookup.clear()
+	for child_name in ["ChunkOverlays", "StaticAssets", "ScaledStatics", "CollisionOverlay", "WarpTriggers", "MapEffects"]:
+		for n in get_children():
+			if n.name == child_name:
+				remove_child(n)
+				n.free()
+	for n in get_children():
+		if String(n.name).begins_with("StaticL"):
+			remove_child(n)
+			n.free()
+
 func draw_chunk(chunk_index: int):
 	var chunk_data = get_chunk_data(chunk_index)
-	if chunk_data.is_empty(): return
+	if chunk_data.is_empty():
+		clear_map_data()
+		return
 	_active_chunk_data = chunk_data
 	
 	if map_width != chunk_data["grid_width"]: 
@@ -572,34 +593,23 @@ func draw_chunk(chunk_index: int):
 	
 	print("--- DRAWING CHUNK ", chunk_index, " (Layer ID: ", chunk_data["layer_id"], ") ---")
 	
-	if not read_manifest_from_binary(): return
+	if not read_manifest_from_binary():
+		clear_map_data()
+		return
 	
 	var bin_file = FileAccess.open(map_file_path, FileAccess.READ)
 	if bin_file == null:
 		print("ERROR: Could not open map.bin!")
+		clear_map_data()
 		return
 		
 	bin_file.big_endian = true 
 	
 	# Clear all old data
-	clear() 
-	debug_cells_collision.clear()
-
-	# Remove any leftover overlay/asset nodes from a previous chunk so
-	# dynamic-entity / grid-event / static markers don't accumulate when
-	# switching layers. queue_free() is deferred, so use free() here to
-	# guarantee the old children are gone before we re-create new ones.
-	for child_name in ["ChunkOverlays", "StaticAssets", "ScaledStatics", "CollisionOverlay", "WarpTriggers"]:
-		for n in get_children():
-			if n.name == child_name:
-				remove_child(n)
-				n.free()
-	# Per-layer static containers ("StaticL0", "StaticL1", ...) are
-	# created fresh each chunk; remove any leftover from the previous one.
-	for n in get_children():
-		if String(n.name).begins_with("StaticL"):
-			remove_child(n)
-			n.free()
+	clear_map_data()
+	
+	if tile_set == null:
+		build_dynamic_tileset()
 	
 	# Rebuild the grid-event tile lookup so the player controller can
 	# query stair/ladder constraints at runtime.
@@ -633,6 +643,8 @@ func draw_chunk(chunk_index: int):
 		# --- RENDER 4-BYTE VISUAL TILES ---
 		if sub_layer["type"] == "visual":
 			var godot_layer_index = sub_layer["index"]
+			var bg_tile_count: int = 0
+			var total_tiles_drawn: int = 0
 			for y in range(map_height):
 				var x = 0
 				while x < map_width:
@@ -642,15 +654,27 @@ func draw_chunk(chunk_index: int):
 					var sprite_idx = bin_file.get_16()
 					
 					if id_map.has(atlas_id):
+						total_tiles_drawn += 1
+						if bg_atlases.get(atlas_id, false):
+							bg_tile_count += 1
 						var source_id = id_map[atlas_id]
-						var atlas_x = sprite_idx % 17
-						var atlas_y = int(sprite_idx / 17) 
+						var tiles_per_row: int = 17
+						if tile_set != null and tile_set.has_source(source_id):
+							var src_atlas := tile_set.get_source(source_id) as TileSetAtlasSource
+							if src_atlas != null and src_atlas.texture != null:
+								tiles_per_row = max(1, src_atlas.texture.get_width() / tile_size)
+						var atlas_x = sprite_idx % tiles_per_row
+						var atlas_y = int(sprite_idx / tiles_per_row) 
 						set_cell(godot_layer_index, Vector2i(x, y), source_id, Vector2i(atlas_x, atlas_y))
 						
 					x += 1
-			# Give every visual sublayer a z_index of (2 * its index) so
-			# statics can be interleaved at (2 * layer + 1).
-			set_layer_z_index(godot_layer_index, 2 * godot_layer_index)
+			# If this sublayer is primarily background sky/cosmos tiles (e.g. mapchip_9000_601),
+			# give it a negative z_index so it renders behind all ground, statics, and actors.
+			# Otherwise give it 2 * its index so statics can be interleaved at 2 * layer + 1.
+			if total_tiles_drawn > 0 and float(bg_tile_count) / float(total_tiles_drawn) > 0.5:
+				set_layer_z_index(godot_layer_index, -2)
+			else:
+				set_layer_z_index(godot_layer_index, 2 * godot_layer_index)
 			print("Successfully drew Visual Layer ", godot_layer_index)
 			
 		# --- RENDER 1-BYTE COLLISION MAP ---
@@ -714,7 +738,13 @@ func draw_chunk(chunk_index: int):
 		# we can build one y-sorted container per layer below.
 		var layer_offsets := {}
 		for obj in statics:
-			layer_offsets[int(obj.get("layer", 0))] = true
+			var w_check := int(obj.get("width", 0))
+			var h_check := int(obj.get("height", 0))
+			var satlas := int(obj.get("atlas_id", 0))
+			if w_check <= 0 or h_check <= 0 or satlas <= 0 or not id_map.has(satlas):
+				continue
+			var l_clamped := clampi(int(obj.get("layer", 0)), 0, 7)
+			layer_offsets[l_clamped] = true
 		var offsets_sorted: Array = layer_offsets.keys()
 		offsets_sorted.sort()
 
@@ -740,7 +770,7 @@ func draw_chunk(chunk_index: int):
 			# atlas pixel coordinates (atlas_x, atlas_y) plus its blit size
 			# (width, height). The data IS the placement.
 			var atlas_id := int(obj["atlas_id"])
-			if not id_map.has(atlas_id):
+			if atlas_id <= 0 or not id_map.has(atlas_id):
 				missing_atlases[atlas_id] = int(missing_atlases.get(atlas_id, 0)) + 1
 				continue
 			var src := int(id_map[atlas_id])
@@ -748,10 +778,12 @@ func draw_chunk(chunk_index: int):
 			var ay_px := int(obj["atlas_y"])
 			var w_px := int(obj["width"])
 			var h_px := int(obj["height"])
+			if w_px <= 0 or h_px <= 0:
+				continue
 			var dst_x := int(obj["x"])
 			var dst_y := int(obj["y"])
 			var scale_pct: int = int(obj.get("scale", 100))
-			var asset_layer := int(obj.get("layer", 0))
+			var asset_layer := clampi(int(obj.get("layer", 0)), 0, 7)
 			var flags_c := int(obj.get("flags_c", 0))
 			var flip_h: bool = (flags_c & 256) != 0
 
@@ -817,6 +849,10 @@ func draw_chunk(chunk_index: int):
 	# --- SPAWN TREASURE CHESTS ---
 	if spawn_entities:
 		_spawn_chests(chunk_data)
+
+	# --- SPAWN SPRITESTUDIO MAP EFFECTS ---
+	if not Engine.is_editor_hint() and spawn_entities:
+		_spawn_map_effects(chunk_data)
 
 	# --- DRAW COLLISION OVERLAY (on top of everything) ---
 	_draw_collision_overlay()
@@ -1367,3 +1403,43 @@ func warp_to(target_lid: int, target_tile_x: int, target_tile_y: int) -> void:
 	# immediately drag the player back into a wall on the new map.
 	if "velocity" in player:
 		player.velocity = Vector2.ZERO
+
+
+func _spawn_map_effects(chunk_data: Dictionary) -> void:
+	for n in get_children():
+		if n.name == "MapEffects":
+			remove_child(n)
+			n.free()
+	if not chunk_data.has("objects"):
+		return
+	var entities: Array = chunk_data["objects"].get("dynamic_entities", [])
+	if entities.is_empty():
+		return
+	var container: Node2D = null
+	for e in entities:
+		if String(e.get("kind", "")) != "effect_spawner":
+			continue
+		var payload_hex: String = String(e.get("payload_hex", ""))
+		if payload_hex == "":
+			continue
+		var commands: Array[Dictionary] = EventInterpreter.extract_spawner_effects(payload_hex.hex_decode())
+		for cmd in commands:
+			if int(cmd.get("op", 0)) != EventInterpreter.OP_PLAY_SSBP:
+				continue
+			if bool(cmd.get("screen_space", false)):
+				continue
+			var ssbp_path: String = "res://assets/map_effect/" + String(cmd.get("file_name", "")).get_file()
+			if not FileAccess.file_exists(ssbp_path):
+				continue
+			if container == null:
+				container = Node2D.new()
+				container.name = "MapEffects"
+				add_child(container)
+			var player := SsbpPlayer.new()
+			var anim_ref: String = String(cmd.get("anim_ref", ""))
+			player.name = "Ssbp_%d_%s" % [int(cmd.get("eff_id", 0)), anim_ref.replace("/", "_")]
+			player.position = cmd.get("pos", Vector2.ZERO) as Vector2
+			var z: int = int(cmd.get("z", 0))
+			player.z_index = -1 if z <= 5 else 7
+			container.add_child(player)
+			player.open(ssbp_path, anim_ref)

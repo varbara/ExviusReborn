@@ -5,6 +5,9 @@ class_name DungeonMissionListPopup
 # No DB or game-state logic.
 
 signal mission_selected(mission_id: String)
+## Emitted when the player asks to be taken to a mission's dungeon from the list
+## (a mission that was already cleared). The owner decides what that means.
+signal mission_requested(mission_id: String)
 signal back_pressed
 
 const ROW_SCENE: PackedScene = preload("res://features/outgame/map/DungeonMissionListRow.tscn")
@@ -21,6 +24,8 @@ const INITIAL_CHALLENGE_NAME: String = "complete the quest"
 @onready var initial_rows_host: VBoxContainer = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/InitialRowsHost
 @onready var achievement_header: Control = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/AchievementHeader
 @onready var achievement_rows_host: VBoxContainer = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/AchievementRowsHost
+@onready var next_spacer: Control = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/NextSpacer
+@onready var empty_challenges_label: Label = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/EmptyChallengesLabel
 @onready var next_button: TextureButton = $ContentRoot/VBoxContainer/MissionChallengesPanel/ChallengesArea/ChallengesHost/NextButton
 @onready var back_button: TextureButton = $HeaderLayer/HeaderAnchor/BackButton
 
@@ -149,6 +154,12 @@ func _populate_challenge_rows(mission: Dictionary) -> void:
 	var show_stars: bool = objectives_var is Array
 	var objectives: Array = objectives_var if show_stars else []
 
+	var has_challenges: bool = not challenges.is_empty()
+	if next_spacer:
+		next_spacer.visible = not has_challenges
+	if empty_challenges_label:
+		empty_challenges_label.visible = not has_challenges
+
 	_set_section_visible(initial_header, initial_rows_host, sections["initial"], objectives, 0)
 	var achievement_offset: int = sections["initial"].size()
 	_set_section_visible(achievement_header, achievement_rows_host, sections["achievement"], objectives, achievement_offset)
@@ -210,10 +221,23 @@ func _clear_challenge_rows() -> void:
 		child.queue_free()
 	initial_header.visible = false
 	achievement_header.visible = false
+	if next_spacer:
+		next_spacer.visible = false
+	if empty_challenges_label:
+		empty_challenges_label.visible = false
 
 
 func _on_row_pressed(mission_id: String) -> void:
 	_show_challenges(mission_id)
+
+
+## Tap-and-hold (or the "go" hint on a cleared row) asks the owner to open the
+## mission's dungeon. Kept separate from row_pressed so a normal tap still shows
+## the challenge list first.
+func request_mission(mission_id: String) -> void:
+	if mission_id.strip_edges() == "":
+		return
+	mission_requested.emit(mission_id)
 
 func _on_next_pressed() -> void:
 	if _selected_mission_id != "":

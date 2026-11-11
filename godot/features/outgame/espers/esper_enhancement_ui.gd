@@ -7,6 +7,13 @@ extends Control
 @onready var cp_label: Label = $cp_area/label_cp
 @onready var xp_bar: TextureRect = $summon_mix_bar_area/summon_mix_bar_frame/summon_mix_bar
 @onready var summon_image: TextureRect = $SummonImage
+@onready var hp_label: Label = $summon_mix_status_bg/summon_mix_status_hp/hp_label
+@onready var mp_label: Label = $summon_mix_status_bg/summon_mix_status_mp/mp_label
+@onready var atk_label: Label = $summon_mix_status_bg/summon_mix_status_atk/atk_label
+@onready var def_label: Label = $summon_mix_status_bg/summon_mix_status_def/def_label
+@onready var mag_label: Label = $summon_mix_status_bg/summon_mix_status_mag/mag_label
+@onready var spr_label: Label = $summon_mix_status_bg/summon_mix_status_mind/spr_label
+@onready var act_item_name: Label = $summon_mix_act_item_bg/summon_mix_act_item_name
 
 var _summon_id: String = ""
 var _summon_name: String = ""
@@ -21,6 +28,8 @@ var _summon_mix_next_repeat_at: float = 0.0
 func _ready() -> void:
 	back_button.pressed.connect(_on_back_pressed)
 	summon_mix_item.gui_input.connect(_on_summon_mix_item_gui_input)
+	summon_mix_item.pivot_offset = summon_mix_item.size * 0.5
+	act_item_name.text = "ผลึกเวทมนตร์ (Magicite)"
 	set_process(true)
 	_refresh_exp_bar()
 
@@ -53,6 +62,12 @@ func _refresh_exp_bar() -> void:
 		summon_mix_bar_lv.text = "Lv. -"
 		summon_mix_bar_exp.text = "0 / 0"
 		cp_label.text = "0"
+		hp_label.text = "0"
+		mp_label.text = "0"
+		atk_label.text = "0"
+		def_label.text = "0"
+		mag_label.text = "0"
+		spr_label.text = "0"
 		return
 
 	var progression: Dictionary = EsperService.get_esper_progression(_summon_id)
@@ -66,10 +81,12 @@ func _refresh_exp_bar() -> void:
 		var fallback_level: int = maxi(1, int(progression.get("level", 1)))
 		summon_mix_bar_lv.text = "Lv. %d" % fallback_level
 		summon_mix_bar_exp.text = "%d / 0" % total_xp
+		_update_stats_display(rank, fallback_level)
 		return
 
 	total_xp = mini(total_xp, thresholds[thresholds.size() - 1])
 	var level: int = _calculate_level_from_xp(total_xp, thresholds)
+	_update_stats_display(rank, level)
 	var level_index: int = level - 1
 	var max_level_index: int = thresholds.size() - 1
 
@@ -92,6 +109,21 @@ func _refresh_exp_bar() -> void:
 
 	var fill_ratio: float = clampf(float(progress) / float(required), 0.0, 1.0)
 	xp_bar.scale.x = fill_ratio
+
+func _update_stats_display(rank: int, level: int) -> void:
+	if _summon_id == "":
+		return
+	var summon_data: Dictionary = GameDatabase.get_esper(int(_summon_id), rank)
+	var stats: Dictionary = StatCalculator._extract_esper_stats_for_level_and_rank(summon_data, level)
+	var board_stat_bonus: Dictionary = EsperService.get_esper_board_stat_bonuses(_summon_id)
+	for stat_key in ["HP", "MP", "ATK", "DEF", "MAG", "SPR"]:
+		stats[stat_key] = int(stats.get(stat_key, 0)) + int(board_stat_bonus.get(stat_key, 0))
+	hp_label.text = str(stats.get("HP", 0))
+	mp_label.text = str(stats.get("MP", 0))
+	atk_label.text = str(stats.get("ATK", 0))
+	def_label.text = str(stats.get("DEF", 0))
+	mag_label.text = str(stats.get("MAG", 0))
+	spr_label.text = str(stats.get("SPR", 0))
 
 func _on_summon_mix_item_gui_input(event: InputEvent) -> void:
 	if _summon_id == "":
@@ -133,6 +165,11 @@ func _add_summon_mix_xp() -> bool:
 
 	EsperService.set_esper_progression(_summon_id, rank, new_level, new_total_xp, old_level)
 	_refresh_exp_bar()
+
+	var tween: Tween = create_tween()
+	tween.tween_property(summon_mix_item, "scale", Vector2(1.12, 1.12), 0.05).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(summon_mix_item, "scale", Vector2(1.0, 1.0), 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
 	return new_total_xp < max_total_xp
 
 func _get_esper_exp_thresholds(rank: int) -> Array[int]:

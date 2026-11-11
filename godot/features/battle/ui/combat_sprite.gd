@@ -87,6 +87,8 @@ signal long_pressed(index: int)
 ## Emitted once the whole victory pose (win_before + STATE_LOOPS win loops) has
 ## played out, so the caller knows it can move on to the result screen.
 signal win_finished(index: int)
+## Emitted once an action pose (ATK, MAGIC_ATK, LIMIT_ATK) completes its loops and returns to resting state.
+signal action_finished(index: int, state: AnimState)
 
 var _is_pressed: bool = false
 var _press_elapsed: float = 0.0
@@ -196,12 +198,15 @@ func _on_anim_completed() -> void:
 
 	var next_state: AnimState = STATE_NEXT[anim_state]
 	var was_win: bool = anim_state == AnimState.WIN_BEFORE or anim_state == AnimState.WIN
+	var was_action: AnimState = anim_state
 	_enter(next_state)
 
 	# Report the victory pose as done once we leave it for good -- including the
 	# case where the "win" sheet is missing and _enter() fell through to idle.
 	if was_win and anim_state != AnimState.WIN:
 		win_finished.emit(index)
+	elif was_action == AnimState.ATK or was_action == AnimState.MAGIC_ATK or was_action == AnimState.LIMIT_ATK:
+		action_finished.emit(index, was_action)
 
 func _anim_for_state(state: AnimState) -> Dictionary:
 	match state:
@@ -290,8 +295,80 @@ func play_win() -> void:
 
 # === Frame playback ===
 
+var _is_status_paused: bool = false
+var _active_ailment: String = ""
+
+
+## Updates visual modulation (color tint, pause) based on active battle ailments.
+func update_status_visual(statuses: Array) -> void:
+	var best_ailment: String = ""
+	var best_priority: int = -1
+
+	const PRIORITY: Dictionary = {
+		"PETRIFY": 100,
+		"STOP": 90,
+		"SLEEP": 80,
+		"PARALYSIS": 70,
+		"PARALYZE": 70,
+		"CONFUSION": 60,
+		"CONFUSE": 60,
+		"BERSERK": 50,
+		"CHARM": 40,
+		"POISON": 30,
+		"BLIND": 20,
+		"DISEASE": 10,
+	}
+
+	for st in statuses:
+		if st is BattleStatus and st.kind == BattleStatus.AILMENT:
+			var k: String = st.key.to_upper()
+			var p: int = PRIORITY.get(k, 0)
+			if p > best_priority:
+				best_priority = p
+				best_ailment = k
+
+	_active_ailment = best_ailment
+	match best_ailment:
+		"PETRIFY":
+			modulate = Color(0.45, 0.45, 0.45)
+			_is_status_paused = true
+		"STOP":
+			modulate = Color(0.7, 0.85, 1.0)
+			_is_status_paused = true
+		"SLEEP":
+			modulate = Color(0.65, 0.75, 1.0)
+			_is_status_paused = true
+		"PARALYSIS", "PARALYZE":
+			modulate = Color(1.0, 1.0, 0.4)
+			_is_status_paused = true
+		"CONFUSION", "CONFUSE":
+			modulate = Color(1.0, 0.75, 0.4)
+			_is_status_paused = false
+		"BERSERK":
+			modulate = Color(1.0, 0.4, 0.4)
+			_is_status_paused = false
+		"CHARM":
+			modulate = Color(1.0, 0.6, 0.8)
+			_is_status_paused = false
+		"POISON":
+			modulate = Color(0.85, 0.55, 1.0)
+			_is_status_paused = false
+		"BLIND":
+			modulate = Color(0.6, 0.6, 0.6)
+			_is_status_paused = false
+		"DISEASE":
+			modulate = Color(0.75, 0.9, 0.5)
+			_is_status_paused = false
+		_:
+			modulate = Color.WHITE
+			_is_status_paused = false
+
+
 func _process(delta: float) -> void:
 	_update_long_press(delta)
+
+	if _is_status_paused:
+		return
 
 	var anim: Dictionary = _anim_for_state(anim_state)
 	if not _has_frames(anim):

@@ -6,6 +6,41 @@ extends "res://tests/test_case.gd"
 const Fixtures = preload("res://tests/battle/battle_fixtures.gd")
 
 
+## The approximated-`actbetween` warning is keyed per param, so a battle that
+## evaluates several params reports each one instead of only the first.
+func test_actbetween_warning_is_reported_per_parameter() -> void:
+	MonsterAIRuntime.clear_warnings()
+	var state := MonsterAIState.new()
+	var subject: Dictionary = {"current_hp": 100, "max_hp": 100}
+	var rule: Dictionary = {"order": 1, "verb": "skill", "probability": 100.0}
+	var ctx: Dictionary = {"self": subject}
+	for param in [2, 3, 5]:
+		var condition: Dictionary = {
+			"type": "actbetween", "params": PackedStringArray([str(param)]),
+		}
+		MonsterAIRuntime._condition_holds(condition, subject, rule, state, ctx)
+	# Every param got its own key, not one shared "actbetween" entry.
+	assert_true(MonsterAIRuntime._warned.has("actbetween:2"), "param 2 is reported")
+	assert_true(MonsterAIRuntime._warned.has("actbetween:3"), "param 3 is reported")
+	assert_true(MonsterAIRuntime._warned.has("actbetween:5"), "param 5 is reported")
+	assert_false(MonsterAIRuntime._warned.has("actbetween"), "no bare key swallows the rest")
+	MonsterAIRuntime.clear_warnings()
+
+
+## With a single-action monster, acts_this_turn is 0 while its rules are evaluated,
+## so the 0-based reading makes actbetween fire on the very first action.
+func test_actbetween_zero_based_reading_fires_on_first_action() -> void:
+	var state := MonsterAIState.new()
+	state.begin_turn()
+	assert_eq(state.acts_this_turn, 0, "a fresh turn starts at act 0")
+	var subject: Dictionary = {"current_hp": 100, "max_hp": 100}
+	var rule: Dictionary = {"order": 1, "verb": "skill", "probability": 100.0}
+	var condition: Dictionary = {"type": "actbetween", "params": PackedStringArray(["5"])}
+	var fired: bool = MonsterAIRuntime._condition_holds(
+		condition, subject, rule, state, {"self": subject})
+	assert_true(fired, "actbetween:5 is true at act 0 under the current 0-based reading")
+
+
 ## Attacks once per turn and records the HP of party slot 1 each time it decides.
 class RecordingBrain:
 	extends EnemyBrain

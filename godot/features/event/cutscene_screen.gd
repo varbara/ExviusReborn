@@ -34,7 +34,10 @@ func _ready() -> void:
 	_skip_button = $SkipButton
 	player = $Container/Viewport/Event
 	player.finished.connect(func(reason: String) -> void: _ended.emit(reason))
-	tree_exiting.connect(func() -> void: _ended.emit("closed"))
+	tree_exiting.connect(func() -> void:
+		AudioService.stop_ambient(0.5)
+		_ended.emit("closed")
+	)
 	_skip_button.pressed.connect(skip)
 
 

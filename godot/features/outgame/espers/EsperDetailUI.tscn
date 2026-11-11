@@ -37,6 +37,22 @@
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hfjiv"]
 bg_color = Color(1, 0, 0, 0.2)
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_panel"]
+bg_color = Color(0.07, 0.1, 0.16, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.75, 0.35, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+expand_margin_left = 8.0
+expand_margin_top = 8.0
+expand_margin_right = 8.0
+expand_margin_bottom = 8.0
+
 [node name="EsperDetailUi" type="Control" unique_id=2039680937]
 layout_mode = 3
 anchors_preset = 15
@@ -458,3 +474,72 @@ offset_bottom = 40.0
 text = "Back"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="detail_modal" type="Control" parent="." unique_id=987654321]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="dimmer" type="ColorRect" parent="detail_modal" unique_id=987654322]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.65)
+
+[node name="modal_panel" type="PanelContainer" parent="detail_modal" unique_id=987654323]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -270.0
+offset_top = -240.0
+offset_right = 270.0
+offset_bottom = 240.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_panel")
+
+[node name="vbox" type="VBoxContainer" parent="detail_modal/modal_panel" unique_id=987654324]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="header" type="HBoxContainer" parent="detail_modal/modal_panel/vbox" unique_id=987654325]
+layout_mode = 2
+
+[node name="modal_title" type="Label" parent="detail_modal/modal_panel/vbox/header" unique_id=987654326]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.9, 0.45, 1)
+theme_override_font_sizes/font_size = 20
+text = "Detail Title"
+vertical_alignment = 1
+
+[node name="btn_close_modal" type="Button" parent="detail_modal/modal_panel/vbox/header" unique_id=987654327]
+custom_minimum_size = Vector2(40, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = " ✕ "
+
+[node name="scroll" type="ScrollContainer" parent="detail_modal/modal_panel/vbox" unique_id=987654328]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="modal_content" type="RichTextLabel" parent="detail_modal/modal_panel/vbox/scroll" unique_id=987654329]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_font_sizes/normal_font_size = 15
+theme_override_font_sizes/bold_font_size = 16
+bbcode_enabled = true
+fit_content = false
+scroll_active = true

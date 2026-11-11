@@ -817,6 +817,9 @@ func resolve_damage_hit(hit: ScheduledHit) -> void:
 	var target: Combatant = combatant(hit.target_id)
 	if target == null or not target.is_alive():
 		_miss(hit, &"target_down")
+		if actor != null and actor.is_party() and target != null and target.is_enemy() and not hit.cancelled:
+			_roll_limit_crystal(actor, target, hit)
+			_roll_esper_orb(actor, target, hit)
 		return
 	# Landed or not, the target sustained the attack (wiki: evading still counts).
 	Counters.note_sustained(self, hit)
@@ -1151,6 +1154,8 @@ func format_event(event: Dictionary) -> String:
 			return "%s %s: opcode %d %s (%s)" % [
 				head, _name(event.get("actor")), int(event["opcode"]), event["effect"], event["reason"],
 			]
+		BattleEventLog.LIBRA_SCANNED:
+			return "%s %s scans %s" % [head, _name(event.get("actor")), _name(event.get("target"))]
 		BattleEventLog.RESTORED:
 			return "%s %s +%d HP +%d MP %s" % [head, _name(event.get("target")), int(event["hp"]), int(event["mp"]), event["reason"]]
 		BattleEventLog.STATUS_DAMAGE:
@@ -1976,17 +1981,26 @@ func _status_resisted(hit: ScheduledHit, target: Combatant, status: BattleStatus
 	})
 
 
-## A damaging party hit on an enemy may drop a limit crystal for a random living party
-## member (old engine rule). LB fill rate statuses and passives raise what it gives.
+## A damaging party hit on an enemy may drop a limit crystal for a living party
+## member. Smart distribution prioritizes members whose LB is not yet full, with
+## a bonus priority for the attacker. LB fill rate statuses and passives raise what it gives.
 func _roll_limit_crystal(actor: Combatant, target: Combatant, hit: ScheduledHit) -> void:
-	if actor == null or not actor.is_party() or not target.is_enemy() or hit.final_amount <= 0:
+	if actor == null or not actor.is_party() or not target.is_enemy():
+		return
+	if hit.final_amount <= 0 and (target.is_alive() or hit.amount <= 0):
 		return
 	if rules.lb_crystal_drop_chance <= 0.0 or rng.randf() >= rules.lb_crystal_drop_chance:
 		return
-	var receivers: Array[Combatant] = living_party()
-	if receivers.is_empty():
+	var living: Array[Combatant] = living_party()
+	if living.is_empty():
 		return
-	var receiver: Combatant = receivers[rng.randi_range(0, receivers.size() - 1)]
+	var needy: Array[Combatant] = living.filter(func(m: Combatant) -> bool: return m.lb < m.max_lb)
+	var pool: Array[Combatant] = needy if not needy.is_empty() else living
+	var receiver: Combatant = null
+	if actor.is_alive() and actor.lb < actor.max_lb and rng.randf() < 0.5:
+		receiver = actor
+	else:
+		receiver = pool[rng.randi_range(0, pool.size() - 1)]
 	var gained: int = receiver.add_lb(roundi(float(rules.lb_crystal_amount) * (1.0 + float(receiver.lb_fill_rate()) / 100.0)))
 	events.append(BattleEventLog.LB_CRYSTAL_DROPPED, frame, {
 		"source": target.id,
@@ -2000,7 +2014,9 @@ func _roll_limit_crystal(actor: Combatant, target: Combatant, hit: ScheduledHit)
 ## A damaging party hit on an enemy may drop an esper orb into the party's gauge
 ## (rules.esper_orb_drop_chance), the same hits that may drop limit crystals.
 func _roll_esper_orb(actor: Combatant, target: Combatant, hit: ScheduledHit) -> void:
-	if actor == null or not actor.is_party() or not target.is_enemy() or hit.final_amount <= 0:
+	if actor == null or not actor.is_party() or not target.is_enemy():
+		return
+	if hit.final_amount <= 0 and (target.is_alive() or hit.amount <= 0):
 		return
 	if rules.esper_orb_drop_chance <= 0.0 or rng.randf() >= rules.esper_orb_drop_chance:
 		return

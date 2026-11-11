@@ -200,6 +200,8 @@ func load_initial_data(email: String) -> void:
 
 	UnitService.load_from_local()
 	UnitService.emit_updated()
+	# A save written before a story join existed still gets that unit.
+	StoryUnitService.apply_grants("initial_load")
 
 	ColosseumService.load_progress()
 

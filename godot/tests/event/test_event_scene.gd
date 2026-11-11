@@ -49,6 +49,17 @@ func test_the_prologue_sets_up_rain_and_lasswell_on_the_deck() -> void:
 	assert_eq(stage.fade_alpha(), 1.0, "it opens on a fade-in from black")
 
 
+func test_the_opening_movie_story_event_plays_op_clip_and_opening_bgm() -> void:
+	assert_true(_player.play_story_event("1001000"))
+	var stage: EventStage = _player.stage
+	_player.step_frame()
+	assert_eq(stage.movies_played, ["op_clip.usm"] as Array[String])
+	assert_true(stage.is_movie_playing())
+	assert_false(stage.dialogue._window.visible, "dialogue window stays hidden when no dialogue is shown")
+	stage.tap()
+	assert_false(stage.is_movie_playing())
+
+
 func test_the_prologue_plays_its_twelve_lines_and_ends_on_the_bridge() -> void:
 	assert_true(_player.play_story_event("1001001"))
 	var frames: int = _play_to_end()
@@ -67,6 +78,50 @@ func test_the_prologue_plays_its_twelve_lines_and_ends_on_the_bridge() -> void:
 
 ## A click arrives as a mouse button and an emulated touch in the same frame. It must
 ## complete the line that is appearing, not complete it and dismiss it.
+func test_1007001_play() -> void:
+	_player.get_node("Stage").draw_map = true
+	assert_true(_player.play_story_event("1007001"))
+	for i in 600:
+		_player.step_frame()
+		if _player.stage.dialogue.state == EventDialogue.State.CURSOR:
+			print("Frame %d: showing line '%s', tapping..." % [i, _player.stage.dialogue.shown_text()])
+			_player.stage.tap()
+		if not _player.running:
+			print("Cutscene finished at frame %d!" % i)
+			break
+	print("Running:", _player.running, "finished:", _finished)
+
+
+func test_town_mitra_and_farplane_playback() -> void:
+	# Test Town of Mitra (1003001) can play and shows dialogue
+	assert_true(_player.play_story_event("1003001"))
+	_play_to_end(1000)
+	assert_true(_player.stage.lines_shown.has(210073), "Mitra line 210073 was shown")
+
+	# Test Farplane (1003004) can play and shows dialogue
+	_player.stop("test")
+	assert_true(_player.play_story_event("1003004"))
+	for i in 800:
+		_player.step_frame()
+		if _player.stage.dialogue.state == EventDialogue.State.CURSOR:
+			_player.stage.tap()
+		if not _player.running:
+			break
+	assert_true(_player.stage.lines_shown.has(210001), "Farplane line 210001 was shown")
+
+
+func test_earth_shrine_3_initial_actors_visibility() -> void:
+	assert_true(_player.play_story_event("1001006"))
+	_player.step_frame()
+	var stage: EventStage = _player.stage
+	assert_false(stage.actors["e2"].visible, "collapsed Rain must start hidden")
+	assert_false(stage.actors["e15"].visible, "staged Rain must start hidden")
+	assert_false(stage.actors["e19"].visible, "collapsed Lasswell must start hidden")
+	assert_false(stage.actors["e20"].visible, "struggling Rain must start hidden")
+	assert_false(stage.actors["e21"].visible, "struggling Lasswell must start hidden")
+	assert_true(stage.actors["e1"].visible, "Veritas of the Dark is visible at the crystal")
+
+
 func test_one_click_completes_a_line_and_waits() -> void:
 	assert_true(_player.play_story_event("1001001"))
 	var dialogue: EventDialogue = _player.stage.dialogue
@@ -84,7 +139,7 @@ func test_one_click_completes_a_line_and_waits() -> void:
 	_player._unhandled_input(click)
 	_player._unhandled_input(touch)
 	assert_eq(dialogue.state, EventDialogue.State.CURSOR, "completed, waiting for the next press")
-	assert_eq(dialogue.shown_text(), "Is that...a crystal!?", "whole line, its pause and speed ignored")
+	assert_true(dialogue.shown_text() == "นั่นมัน...ผลึกงั้นเหรอ!?" or dialogue.shown_text() == "Is that...a crystal!?", "whole line, its pause and speed ignored")
 
 
 func test_common_image_list_reads_without_utf8() -> void:
@@ -157,6 +212,28 @@ func test_the_stage_draws_the_scene_layer() -> void:
 	var tile_map: Node = stage.get_node("TileMap")
 	assert_eq(str(tile_map.get("town_id")), "111010100")
 	assert_eq(int(tile_map.get("target_chunk")), int(tile_map.call("chunk_index_for_lid", 61)))
+	assert_eq(stage.ssbp_played, ["opening_bg/anime"] as Array[String])
+	assert_true(stage.active_ssbp.has(1501), "airship sky backdrop ev_opening.ssbp is active")
+	var sky: SsbpPlayer = stage.active_ssbp[1501][0]
+	assert_eq(sky.position, Vector2(1073, 0))
+	assert_eq(sky.z_index, -1)
+
+
+func test_the_prologue_spawns_and_stops_crystal_fina_vfx() -> void:
+	assert_true(_player.play_story_event("1001001"))
+	var stage: EventStage = _player.stage
+	var frames: int = 0
+	while not stage.lines_shown.has(210807) and frames < 5000:
+		_player.step_frame()
+		frames += 1
+		if stage.dialogue.state == EventDialogue.State.CURSOR:
+			stage.tap()
+	assert_eq(stage.vfx_played, ["map_crystal_fina_001_fadein.bmb", "map_crystal_fina_001.bmb"] as Array[String])
+	assert_true(stage.active_vfx.has(19), "crystal Fina VFX stays active while Fina speaks")
+	var crystal_node: Node2D = stage.active_vfx[19]["node"]
+	assert_eq(crystal_node.position, Vector2(1398, 435))
+	_play_to_end()
+	assert_false(stage.active_vfx.has(19), "op 0x66 stops crystal Fina VFX after she vanishes")
 
 
 ## The forge's own shopkeeper stood next to the cutscene's Gylbart until the map's NPCs

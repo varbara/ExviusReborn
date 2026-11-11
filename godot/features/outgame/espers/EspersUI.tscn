@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://caiavxfskfqo7"]
 
 [ext_resource type="Script" uid="uid://cyjffux2bypdg" path="res://features/outgame/espers/espers_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://dntla4oacfeg8" path="res://assets/ui/common/common_bg.png" id="2_bg"]
 [ext_resource type="Texture2D" uid="uid://c1anumws64r7v" path="res://assets/ui/beast/summon_frame.tres" id="2_2sofd"]
 [ext_resource type="Texture2D" uid="uid://cyo1su671dmm5" path="res://assets/ui/common/bottomline.tres" id="2_jfx50"]
 [ext_resource type="Texture2D" uid="uid://b6sqfjo0ifrwm" path="res://assets/ui/beast/summon_star_big.tres" id="3_6edbp"]
@@ -17,6 +18,10 @@ offset_top = 120.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
+
+[node name="CommonBg2" type="Sprite2D" parent="." unique_id=109487915]
+position = Vector2(320, 448)
+texture = ExtResource("2_bg")
 
 [node name="topline" type="TextureRect" parent="." unique_id=959213555]
 layout_mode = 0

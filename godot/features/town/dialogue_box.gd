@@ -75,6 +75,8 @@ func _build_ui() -> void:
 	vbox.add_child(_speaker_label)
 
 	_body_label = RichTextLabel.new()
+	# DialogueLoader._resolve_pages already converts <br> to "\n" and strips every
+	# other tag, so the label receives plain text -- bbcode stays off on purpose.
 	_body_label.bbcode_enabled = false
 	_body_label.fit_content = false
 	_body_label.scroll_active = true

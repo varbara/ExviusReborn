@@ -34,7 +34,13 @@
 
 [node name="UnitAwakening" type="Control" unique_id=1540955620]
 layout_mode = 3
-anchors_preset = 0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 640.0
+offset_bottom = 960.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_40rqk")
 
 [node name="CommonBg2" type="Sprite2D" parent="." unique_id=631544207]

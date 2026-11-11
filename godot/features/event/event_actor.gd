@@ -90,6 +90,22 @@ func use_graphic(graphic: Dictionary, images: Dictionary, size: Vector2i) -> boo
 		still.region_rect = Rect2(int(graphic["src_x"]), int(graphic["src_y"]), size.x, size.y)
 		_attach(still, "image")
 		return true
+	if graphic.has("effect"):
+		var stem: String = str(graphic["effect"]).get_file().get_basename()
+		var efk_path: String = "res://assets/battle_effect/" + stem + ".efkefc"
+		if not ResourceLoader.exists(efk_path):
+			return false
+		var holder := Node2D.new()
+		if ClassDB.class_exists("EffekseerEmitter2D"):
+			var res: Resource = ResourceLoader.load(efk_path)
+			var inst: Variant = ClassDB.instantiate("EffekseerEmitter2D")
+			if res != null and inst is Node2D:
+				var emitter: Node2D = inst as Node2D
+				emitter.set("effect", res)
+				emitter.set("autoplay", true)
+				holder.add_child(emitter)
+		_attach(holder, "effect")
+		return true
 	return false
 
 

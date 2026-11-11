@@ -344,15 +344,23 @@ func _populate_lb_and_tmr(unit_inst: Dictionary) -> void:
 		var data: Dictionary = GameDatabase.get_equipment(tmr_id)
 		if not data.is_empty():
 			tmr_name = str(data.get("name", tmr_name))
-			icon_path = "res://assets/equip/" + str(data.get("iconFile", "0.png"))
+			var icon_file: String = str(data.get("iconFile", "0.png"))
+			if ResourceLoader.exists("res://assets/equip/" + icon_file):
+				icon_path = "res://assets/equip/" + icon_file
+			elif ResourceLoader.exists("res://assets/items/" + icon_file):
+				icon_path = "res://assets/items/" + icon_file
 	elif tmr_type == Types.Item_types.MATERIA:
 		var data: Dictionary = GameDatabase.get_materia(int(tmr_id))
 		if not data.is_empty():
 			tmr_name = str(data.get("name", tmr_name))
-			icon_path = "res://assets/materia/" + str(data.get("iconFile", "0.png"))
+			var icon_file: String = str(data.get("iconFile", "0.png"))
+			if ResourceLoader.exists("res://assets/materia/" + icon_file):
+				icon_path = "res://assets/materia/" + icon_file
+			elif ResourceLoader.exists("res://assets/abilities/" + icon_file):
+				icon_path = "res://assets/abilities/" + icon_file
 
 	tm_name_label.text = tmr_name
-	if icon_path != "":
+	if icon_path != "" and ResourceLoader.exists(icon_path):
 		tm_icon_rect.texture = load(icon_path) as Texture2D
 	else:
 		tm_icon_rect.texture = null

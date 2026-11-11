@@ -86,6 +86,12 @@ func _input(event: InputEvent) -> void:
 		_handle_press(event.pressed, event.position)
 	elif event is InputEventScreenDrag:
 		_handle_motion(event.position)
+	elif event is InputEventMouseButton and not event.is_echo():
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			_handle_press(event.pressed, event.position)
+	elif event is InputEventMouseMotion:
+		if (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+			_handle_motion(event.position)
 
 
 func _handle_press(pressed: bool, position: Vector2) -> void:
@@ -122,6 +128,8 @@ func _handle_motion(position: Vector2) -> void:
 	if not _tracking or _ignored_gesture:
 		return
 	var delta: Vector2 = position - _last_position
+	if delta == Vector2.ZERO:
+		return
 	_last_position = position
 
 	if not _dragging:

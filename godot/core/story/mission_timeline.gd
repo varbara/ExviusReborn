@@ -79,12 +79,15 @@ static func parse_battle_script(battle_script_id: String) -> Array:
 	var segments: Array = []
 	for row in GameDatabase.get_battle_script(battle_script_id):
 		var cond: int = int(row.get("cond", 0))
+		var param: Variant = row.get("paramTh")
+		if param == null or str(param).strip_edges() == "":
+			param = row.get("paramEn")
 		segments.append({
 			"cond": cond,
 			"trigger": COND_NAMES.get(cond, "cond %d" % cond),
 			"condParam": row.get("condParam"),
 			"skipFlg": int(row.get("skipFlg", 0)),
-			"lines": _parse_param(row.get("paramEn")),
+			"lines": _parse_param(param),
 		})
 	return segments
 
@@ -122,7 +125,8 @@ static func _parse_param(param_en: Variant) -> Array:
 
 ## Strip FFBE markup so the line is display-ready.
 static func _clean(t: String) -> String:
-	var s: String = t.replace("<br>", " ").replace("<page>", " ").replace("<keywait>", "")
+	var s: String = t.replace('""', '"')  # unescape doubled quotes from the DB
+	s = s.replace("<br>", " ").replace("<page>", " ").replace("<keywait>", "")
 	var rx := RegEx.new()
 	rx.compile("<[^>]+>")  # <wait=N>, <name=..>, <speed=..>, ...
 	s = rx.sub(s, "", true)

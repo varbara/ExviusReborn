@@ -130,8 +130,9 @@ var reaction_gap_frames: int = 20
 # --- Limit gauge ---
 
 ## Chance that a damaging party hit on an enemy drops a limit crystal, and the gauge it
-## gives a random living party member (hundredths of a crystal). Old engine values.
-var lb_crystal_drop_chance: float = 0.2
+## gives a random living party member (hundredths of a crystal). Tuned to 0.65 so
+## attacks and combos reliably generate crystals.
+var lb_crystal_drop_chance: float = 0.65
 var lb_crystal_amount: int = 100
 
 # --- Esper gauge ---

@@ -18,6 +18,9 @@
 [ext_resource type="Texture2D" uid="uid://bylmd2anmyvux" path="res://assets/ui/home/mypage_expedition1.tres" id="16_cuay8"]
 [ext_resource type="Texture2D" uid="uid://b8fj5ha75d7fl" path="res://assets/ui/home/mypage_expedition2.tres" id="17_lqah2"]
 [ext_resource type="Texture2D" uid="uid://bshqk6pl86b31" path="res://assets/ui/home/mypage_expedition3.tres" id="18_fjgrq"]
+[ext_resource type="Texture2D" path="res://assets/ui/home/mypage_recollection1.tres" id="19_rec1"]
+[ext_resource type="Texture2D" path="res://assets/ui/home/mypage_recollection2.tres" id="20_rec2"]
+[ext_resource type="Texture2D" path="res://assets/ui/home/mypage_recollection3.tres" id="21_rec3"]
 
 [node name="ScrollContainer" type="ScrollContainer" unique_id=1464874160]
 offset_top = 570.0
@@ -71,3 +74,9 @@ layout_mode = 2
 texture_normal = ExtResource("16_cuay8")
 texture_pressed = ExtResource("17_lqah2")
 texture_disabled = ExtResource("18_fjgrq")
+
+[node name="Recollection" type="TextureButton" parent="ButtonRow" unique_id=1987525562]
+layout_mode = 2
+texture_normal = ExtResource("19_rec1")
+texture_pressed = ExtResource("20_rec2")
+texture_disabled = ExtResource("21_rec3")

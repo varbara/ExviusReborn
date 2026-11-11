@@ -301,6 +301,11 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Enemy Name"
 
+[node name="EnemyStatusContainer" type="HBoxContainer" parent="MainLayout/InfoBar/HBoxContainer/EnemyInfo" unique_id=987655720]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
 [node name="HBoxContainer" type="HBoxContainer" parent="MainLayout/InfoBar/HBoxContainer/EnemyInfo" unique_id=1593568957]
 visible = false
 layout_mode = 2

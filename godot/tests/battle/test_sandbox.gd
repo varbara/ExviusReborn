@@ -79,14 +79,14 @@ func test_unsupported_effects_names_what_the_engine_cannot_run() -> void:
 	var catalog: SkillCatalog = Fixtures.catalog()
 	catalog.add_record(BattleSkill.KIND_ABILITY, "mixed", Fixtures.record("Mixed", [
 		[1, 1, 1, Fixtures.physical_params(100)],
-		[1, 1, 47, [1]],
+		[1, 1, 48, [1]],
 		[1, 1, 9999, []],
 	]))
 	var battle := BattleEngine.new(catalog, Fixtures.rules(), 1)
 	var skill: BattleSkill = catalog.get_skill(BattleSkill.KIND_ABILITY, "mixed")
 	var unsupported: Array[SkillEffect] = battle.unsupported_effects(skill)
 	assert_eq(unsupported.size(), 2)
-	assert_eq(unsupported[0].opcode, 47, "in the schema (LIBRA), no handler")
+	assert_eq(unsupported[0].opcode, 48, "in the schema (ENABLE_DRINK), no handler")
 	assert_eq(unsupported[1].opcode, 9999, "not in the schema")
 	assert_eq(battle.unsupported_effects(null).size(), 0)
 

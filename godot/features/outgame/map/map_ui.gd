@@ -65,12 +65,22 @@ var _map_canvas_base_size: Vector2 = DEFAULT_CANVAS_SIZE
 var _mission_popup: DungeonMissionListPopup = null
 var _mission_error_dialog: AcceptDialog = null
 
+## Set by init_scene when another screen (e.g. the item drop popup) asks to open a
+## specific mission's dungeon directly. Consumed by _ready after the default view.
+var _pending_mission_id: String = ""
+
 # Town-entry confirmation. `_pending_town_id` is the TOWN `townId`, handed to
 # town_map_ui, which looks it up in the DB TOWN table (name + icon/folder).
 var enter_town_dialog: ConfirmationDialog = null
 var _pending_town_id: String = ""
 var _town_unlock_button: Button = null
 var _town_stores_button: Button = null
+var _town_missions_button: Button = null
+# A dungeon whose place is also a town (see _covering_town): the dungeon's marker
+# is the one drawn, so it is what opens the town dialog for that town.
+var _pending_dungeon_id: String = ""
+var _pending_dungeon_name: String = ""
+var _dungeon_towns: Dictionary = {}
 
 func _ready() -> void:
 	map_back_button.pressed.connect(_on_back_pressed)
@@ -84,6 +94,18 @@ func _ready() -> void:
 	map_content.scale = Vector2(map_zoom_level, map_zoom_level)
 	_apply_map_canvas_size(_map_canvas_base_size)
 	_apply_default_view()
+
+	# Another screen (the item drop popup) asked for a specific mission's dungeon:
+	# override the default view and open that dungeon's mission list.
+	if _pending_mission_id != "":
+		var requested: String = _pending_mission_id
+		_pending_mission_id = ""
+		open_mission(requested)
+
+
+## Whether a parameter set asks for a specific mission (used by _ready).
+func init_scene(params: Dictionary) -> void:
+	_pending_mission_id = str(params.get("mission_id", "")).strip_edges()
 
 
 # === Default view ===
@@ -471,6 +493,12 @@ func _show_dungeon_view(world_id: String, land_id: String, area_id: String) -> v
 		if SwitchService.is_unlocked(t.get("switchInfo")):
 			towns.append(t)
 
+	# A place that exists as both a town and a dungeon keeps a single marker (the
+	# dungeon's). Remember the pairing so that marker can still reach the town: the
+	# scenes that open the next land are played by entering the town, and nothing
+	# else in the data opens their switches.
+	_dungeon_towns = _covering_town_map(dungeons, towns)
+
 	# Background: the area's map is a grid of tile textures (AREA.mapFiles arranged
 	# per AREA.mapDimensions). Falls back to the legacy single map<areaId>.png, then
 	# to a blank canvas sized to fit the dungeon/town markers.
@@ -498,6 +526,13 @@ func _show_dungeon_view(world_id: String, land_id: String, area_id: String) -> v
 	for town in towns:
 		var town_id: String = str(town.get("townId", ""))
 		var town_name: String = str(town.get("townName", ""))
+		# Some settlements exist in BOTH tables at the same name and the same
+		# coordinates (Port City Lodin in 111, Militant Town of Moraque in 1171).
+		# Drawing both stacks two icons and two labels exactly on top of each
+		# other. Keep the dungeon entry: it is the one you can start a mission
+		# from, and the town entry at that spot has no dungeon behind it.
+		if _has_dungeon_marker(dungeons, town):
+			continue
 		_add_point_marker(
 			_parse_pos(str(town.get("position", ""))),
 			MAP_ICON_DIR + str(town.get("iconFile", "")),
@@ -551,6 +586,42 @@ func _add_region_marker(rect: Rect2, label_pos: Vector2, marker_name: String, co
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	lbl.add_theme_constant_override("outline_size", 4)
 	map_content.add_child(lbl)
+
+
+## True when a dungeon entry already covers this town: same name and same map
+## position. Those towns would otherwise render a second icon and label on top of
+## the dungeon's.
+## dungeonId -> townId for every place that is both, so one marker serves both.
+static func _covering_town_map(dungeons: Array, towns: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for dungeon in dungeons:
+		var covering: Dictionary = _covering_town(towns, dungeon)
+		if not covering.is_empty():
+			out[str(dungeon.get("dungeonId", ""))] = str(covering.get("townId", ""))
+	return out
+
+
+## The town standing where `dungeon` stands, {} when none is present in `towns`.
+## Its own marker is not drawn -- _has_dungeon_marker keeps the dungeon's -- so the
+## dungeon's entry is what offers it.
+static func _covering_town(towns: Array, dungeon: Dictionary) -> Dictionary:
+	for town in towns:
+		if _has_dungeon_marker([dungeon], town):
+			return town
+	return {}
+
+
+static func _has_dungeon_marker(dungeons: Array, town: Dictionary) -> bool:
+	var town_name: String = str(town.get("townName", "")).strip_edges()
+	var town_pos: String = str(town.get("position", "")).strip_edges()
+	if town_name == "":
+		return false
+	for dungeon in dungeons:
+		if str(dungeon.get("name", "")).strip_edges() != town_name:
+			continue
+		if str(dungeon.get("position", "")).strip_edges() == town_pos:
+			return true
+	return false
 
 
 # Point-based marker for dungeons and towns (image centered on `location`, name
@@ -628,8 +699,40 @@ func _on_dungeon_clicked(dungeon_id: String, dungeon_name: String) -> void:
 		if not next.is_empty():
 			StoryFlow.go_to(next)
 			return
+	# This marker stands for a place that is also a town: open into the town (its
+	# story scenes run there) and keep the mission list one button away.
+	var covering_town_id: String = str(_dungeon_towns.get(dungeon_id, ""))
+	if covering_town_id != "":
+		_on_town_clicked(covering_town_id, dungeon_name, dungeon_id)
+		return
 	var missions: Array[Dictionary] = _build_mission_popup_entries(GameDatabase.get_missions(dungeon_id))
 	_open_mission_popup(dungeon_name, missions)
+
+
+## Opens the world map on `mission_id`'s dungeon and lists its missions, so a
+## player who has already cleared a stage can go straight back to it. Location
+## resolution lives in MissionService; this only drives navigation. Returns false
+## (and does nothing) when the mission has no resolvable location.
+func open_mission(mission_id: String) -> bool:
+	var target: Dictionary = MissionService.get_mission_map_target(mission_id)
+	if not bool(target.get("ok", false)):
+		return false
+	var world_id: String = str(target.get("world_id", ""))
+	var land_id: String = str(target.get("land_id", ""))
+	var area_id: String = str(target.get("area_id", ""))
+	var dungeon_id: String = str(target.get("dungeon_id", ""))
+	var dungeon_name: String = str(target.get("dungeon_name", ""))
+
+	_select_world_option(world_id)
+	_show_dungeon_view(world_id, land_id, area_id)
+
+	var dungeon_pos: Vector2 = _parse_pos(str(target.get("dungeon_position", "")))
+	if dungeon_pos != Vector2.ZERO:
+		_center_view_on(dungeon_pos)
+
+	var missions: Array[Dictionary] = _build_mission_popup_entries(GameDatabase.get_missions(dungeon_id))
+	_open_mission_popup(dungeon_name, missions)
+	return true
 
 
 func _open_mission_popup(dungeon_name: String, missions: Array[Dictionary]) -> void:
@@ -648,7 +751,15 @@ func _open_mission_popup(dungeon_name: String, missions: Array[Dictionary]) -> v
 		"missions": missions,
 	})
 	popup.mission_selected.connect(_on_mission_row_pressed)
+	popup.mission_requested.connect(_on_mission_requested)
 	popup.back_pressed.connect(_on_back_pressed)
+
+
+## The popup asked to jump to a mission's dungeon (already-cleared stage). The
+## mission list is already on screen for that dungeon, so just refresh it.
+func _on_mission_requested(mission_id: String) -> void:
+	_close_mission_popup()
+	open_mission(mission_id)
 
 
 func _build_mission_popup_entries(missions: Array) -> Array[Dictionary]:
@@ -725,8 +836,10 @@ func _show_mission_error(message: String) -> void:
 
 # === Town entry ===
 
-func _on_town_clicked(town_id: String, town_name: String) -> void:
+func _on_town_clicked(town_id: String, town_name: String, dungeon_id: String = "") -> void:
 	_pending_town_id = town_id
+	_pending_dungeon_id = dungeon_id
+	_pending_dungeon_name = town_name
 	if enter_town_dialog == null or not is_instance_valid(enter_town_dialog):
 		enter_town_dialog = ConfirmationDialog.new()
 		enter_town_dialog.title = "Enter Town"
@@ -736,6 +849,7 @@ func _on_town_clicked(town_id: String, town_name: String) -> void:
 		_town_unlock_button = enter_town_dialog.add_button("Unlock Progression", true, "unlock_progression")
 		enter_town_dialog.add_button("Quests", true, "view_quests")
 		_town_stores_button = enter_town_dialog.add_button("Stores", true, "view_stores")
+		_town_missions_button = enter_town_dialog.add_button("Missions", true, "view_missions")
 		enter_town_dialog.custom_action.connect(_on_enter_town_custom_action)
 		add_child(enter_town_dialog)
 
@@ -748,6 +862,9 @@ func _on_town_clicked(town_id: String, town_name: String) -> void:
 
 	if _town_unlock_button != null and is_instance_valid(_town_unlock_button):
 		_town_unlock_button.visible = (open_switch != "")
+
+	if _town_missions_button != null and is_instance_valid(_town_missions_button):
+		_town_missions_button.visible = (_pending_dungeon_id != "")
 
 	var display_name: String = town_name if town_name != "" else "this town"
 	enter_town_dialog.dialog_text = "Enter %s?" % display_name
@@ -767,6 +884,12 @@ func _on_enter_town_custom_action(action: String) -> void:
 		if enter_town_dialog != null and is_instance_valid(enter_town_dialog):
 			enter_town_dialog.hide()
 		_show_town_stores()
+	elif action == "view_missions":
+		if enter_town_dialog != null and is_instance_valid(enter_town_dialog):
+			enter_town_dialog.hide()
+		if _pending_dungeon_id != "":
+			var missions: Array[Dictionary] = _build_mission_popup_entries(GameDatabase.get_missions(_pending_dungeon_id))
+			_open_mission_popup(_pending_dungeon_name, missions)
 
 var _quest_list_dialog = null
 var _stores_popup = null

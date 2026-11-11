@@ -25,3 +25,15 @@ mono_crash.*.json
 /godot/assets/
 
 /Builds/
+# Local work folders and one-off debug scripts: never pushed.
+/assets_extracted/
+/scratch/
+/godot/scratch/
+*.TMP
+~lib*
+/godot/check_pages.gd*
+/godot/dump_*.gd*
+/godot/find_texts.gd*
+/godot/render_fina.gd*
+/godot/search_text.gd*
+/godot/test_*.gd*

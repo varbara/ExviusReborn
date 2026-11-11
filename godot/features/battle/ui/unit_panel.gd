@@ -2,6 +2,8 @@ extends TextureRect
 
 class_name UnitPanel
 
+const BattleStatusIconHelper = preload("res://features/battle/ui/battle_status_icon_helper.gd")
+
 ## One party member's panel in the battle screen's bottom area: portrait, name, HP, MP
 ## and limit gauges, the queued command's icon, and the gestures (swipe up: attack,
 ## down: defend, right: skills, left: items, tap: act or, while an ally is being picked,
@@ -41,6 +43,7 @@ const VALID_TARGET_COLOR := Color(0.5, 1.0, 0.5, 1.0)
 @onready var mp_bar: Sprite2D = $BattleUnitMpBar
 @onready var limit_bar: Sprite2D = $BattleUnitLimitBar
 @onready var barrier_bar: Sprite2D = $BattleUnitBarrierBar
+@onready var status_container: HBoxContainer = $StatusContainer
 
 var is_ally_targeting_mode: bool = false
 var is_valid_target: bool = false
@@ -88,6 +91,10 @@ func show_command(icon: String) -> void:
 func set_acted(acted: bool) -> void:
 	_acted = acted
 	_update_visual_state()
+
+
+func is_acted() -> bool:
+	return _acted
 
 
 func set_ally_targeting_mode(active: bool, valid: bool = false) -> void:
@@ -161,5 +168,26 @@ func set_barrier_gauge(current_barrier: float) -> void:
 	barrier_gage.visible = is_active
 	barrier_bar.visible = is_active
 	if is_active:
-		barrier_gage.modulate.a = clampf(current_barrier, 0.0, 1.0)
+		barrier_gage.modulate.a = 1.0
 		barrier_bar.scale.x = clampf(current_barrier, 0.0, 1.0)
+
+
+func set_statuses(statuses: Array) -> void:
+	if status_container == null:
+		return
+	for child in status_container.get_children():
+		child.queue_free()
+	var count: int = 0
+	for status in statuses:
+		if count >= 6:
+			break
+		if status is BattleStatus:
+			var tex: Texture2D = BattleStatusIconHelper.get_status_texture(status)
+			if tex != null:
+				var rect := TextureRect.new()
+				rect.texture = tex
+				rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				rect.custom_minimum_size = Vector2(20, 20)
+				status_container.add_child(rect)
+				count += 1

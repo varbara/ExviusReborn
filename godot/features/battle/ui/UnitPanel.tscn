@@ -52,6 +52,15 @@ offset_top = 26.0
 offset_right = 213.0
 offset_bottom = 54.0
 
+[node name="StatusContainer" type="HBoxContainer" parent="." unique_id=314159265]
+layout_mode = 0
+offset_left = 65.0
+offset_top = 4.0
+offset_right = 210.0
+offset_bottom = 26.0
+mouse_filter = 2
+theme_override_constants/separation = 2
+
 [node name="BattleUnitHpBar1" type="Sprite2D" parent="." unique_id=618544670]
 position = Vector2(24, 92)
 texture = ExtResource("4_vu3se")
@@ -69,8 +78,9 @@ expand_mode = 1
 
 [node name="BattleUnitBarrierBar" type="Sprite2D" parent="." unique_id=1252045917]
 visible = false
-position = Vector2(114, 94)
+position = Vector2(24, 92)
 texture = ExtResource("6_j3osv")
+centered = false
 
 [node name="BarrierGage" type="TextureRect" parent="." unique_id=658203581]
 visible = false

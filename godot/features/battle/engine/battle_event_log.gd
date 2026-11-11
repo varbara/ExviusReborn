@@ -102,6 +102,8 @@ const COVERED: StringName = &"covered"
 const COVER_ENDED: StringName = &"cover_ended"
 ## { action, actor, effect_index, opcode, effect, reason }
 const EFFECT_UNSUPPORTED: StringName = &"effect_unsupported"
+## { action, actor, target }: Opcode 47 (Libra / Analyze) scanned `target`.
+const LIBRA_SCANNED: StringName = &"libra_scanned"
 ## { action, actor }
 const ACTION_ENDED: StringName = &"action_ended"
 ## { target, skill_kind, skill_id, turns, uses, source_skill_id, by, replaced }: an op 100

@@ -118,10 +118,21 @@ func deduct_gil(amount: int) -> void:
 	currency_updated.emit(gil, lapis)
 	save_snapshot("deduct_gil")
 
+func has_gil(amount: int) -> bool:
+	return gil >= amount
+
 func add_lapis(amount: int) -> void:
 	lapis += amount
 	currency_updated.emit(gil, lapis)
 	save_snapshot("add_lapis")
+
+func deduct_lapis(amount: int) -> void:
+	lapis = maxi(0, lapis - amount)
+	currency_updated.emit(gil, lapis)
+	save_snapshot("deduct_lapis")
+
+func has_lapis(amount: int) -> bool:
+	return lapis >= amount
 
 func deduct_nrg(amount: int) -> void:
 	current_nrg = maxi(0, current_nrg - amount)

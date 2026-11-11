@@ -19,6 +19,8 @@ const STARTER_RAIN_INSTANCE_ID: String = "starter_100000102"
 const STARTER_LASSWELL_INSTANCE_ID: String = "starter_100000202"
 
 const ENHANCE_MAX_TRUST_VALUE: float = 100.0
+const BATTLE_TRUST_CHANCE: float = 0.10
+const BATTLE_TRUST_GAIN: float = 0.10
 const ENHANCE_GIL_COST_PER_MATERIAL: int = 1000
 const SELL_GIL_PER_UNIT: int = 1000
 const ENHANCE_BASE_XP_GAIN: int = 100
@@ -51,6 +53,9 @@ const TRUST_YIELD_BY_UNIT_ID: Dictionary = {
 }
 
 var owned_units_ids: Array = []
+var banner_pity_counts: Dictionary = {}
+var is_summon_unlocked: bool = false
+var is_tutorial_summon_done: bool = false
 var _unit_exp_patterns_cache: Dictionary = {}
 
 # === Public API ===
@@ -65,18 +70,33 @@ func snapshot_payload() -> Dictionary:
 			lean_units.append(_extract_unit_lean_record(unit))
 		else:
 			lean_units.append(unit)
-	return {"owned_units": lean_units}
+	return {
+		"owned_units": lean_units,
+		"banner_pity_counts": banner_pity_counts.duplicate(),
+		"is_summon_unlocked": is_summon_unlocked,
+		"is_tutorial_summon_done": is_tutorial_summon_done,
+	}
 
 func load_from_local() -> void:
 	var envelope: Dictionary = Persistence.load_snapshot(SNAPSHOT_FILE)
 	if envelope.is_empty():
-		owned_units_ids =  []
+		owned_units_ids = []
+		banner_pity_counts = {}
+		is_summon_unlocked = false
+		is_tutorial_summon_done = false
 
 	var data: Variant = envelope.get("data", {})
 	if not (data is Dictionary):
-		owned_units_ids =  []
+		owned_units_ids = []
+		banner_pity_counts = {}
+		is_summon_unlocked = false
+		is_tutorial_summon_done = false
 
 	var payload: Array = data.get("owned_units", [])
+	var saved_pity: Variant = data.get("banner_pity_counts", {})
+	banner_pity_counts = saved_pity.duplicate() if saved_pity is Dictionary else {}
+	is_summon_unlocked = bool(data.get("is_summon_unlocked", false))
+	is_tutorial_summon_done = bool(data.get("is_tutorial_summon_done", false))
 	
 	owned_units_ids = _hydrate_owned_units(payload)
 
@@ -86,7 +106,43 @@ func reset_to_starter() -> bool:
 	if rain_unit.is_empty() or lasswell_unit.is_empty():
 		return false
 	owned_units_ids = _hydrate_owned_units([rain_unit, lasswell_unit])
+	banner_pity_counts = {}
+	is_summon_unlocked = false
+	is_tutorial_summon_done = false
 	return true
+
+func is_summon_system_unlocked() -> bool:
+	if is_summon_unlocked or is_tutorial_summon_done:
+		return true
+	var sw: Node = get_node_or_null("/root/SwitchService")
+	if sw != null and sw.is_unlocked("10002200"):
+		return true
+	return false
+
+func complete_tutorial_summon() -> void:
+	is_tutorial_summon_done = true
+	is_summon_unlocked = true
+	emit_updated()
+	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "complete_tutorial_summon")
+
+func perform_tutorial_summon() -> Dictionary:
+	if is_tutorial_summon_done:
+		push_warning("UnitService: Tutorial summon already performed! Cannot perform again.")
+		return {"error": "Tutorial summon already completed"}
+	var tutorial_banner: Dictionary = {
+		"id": "tutorial_first_vision",
+		"title": "First Vision Summon (อัญเชิญวิชั่นครั้งแรก)",
+		"subtitle": "ลาสเวลล์: 'เอาล่ะ เรน... ลองอัญเชิญวิชั่นดูสิ!'",
+		"category": "rare",
+		"pool_type": "rare",
+		"pity_pulls": 0,
+		"rates": {"1_2": 0, "3": 70, "4": 30, "5": 0, "7": 0, "featured_boost": 50},
+		"featured_units": [201000104, 204000103, 206000203],
+		"unit_pool": [204000103, 204000203, 206000203, 206000403, 206000503, 202000203, 209000103, 212000403, 100004604, 201000104]
+	}
+	var res: Dictionary = summon_from_banner(tutorial_banner, 1)
+	complete_tutorial_summon()
+	return res
 
 func build_starter_unit(unit_id: String, instance_id: String) -> Dictionary:
 	var unit_data: Dictionary = GameDatabase.get_unit(int(unit_id))
@@ -112,6 +168,157 @@ func build_starter_unit(unit_id: String, instance_id: String) -> Dictionary:
 		"trust_reward_claimed": false
 	}
 
+## Builds one unit the story hands over, at `level`, wearing nothing. The xp is what
+## is stored: _hydrate_owned_units derives the level from it, and a level is reached
+## once xp passes that level's entry in the pattern.
+func build_story_unit(unit_id: String, instance_id: String, level: int = 1) -> Dictionary:
+	var unit_data: Dictionary = GameDatabase.get_unit(int(unit_id))
+	if unit_data.is_empty():
+		return {}
+	var exp_pattern: int = int(unit_data.get("expPatternId", 0))
+	var max_level: int = int(unit_data.get("maxLv", 1))
+	var start_level: int = clampi(level, 1, max_level)
+
+	return {
+		"instance_id": instance_id,
+		"unit_id": unit_id,
+		"level": start_level,
+		"xp": _calculate_total_xp_for_level(start_level, exp_pattern) + 1,
+		"current_rarity": int(unit_data.get("rare", 2)),
+		"equipment": {},
+		"trust_value": 0,
+		"limitburst_level": 1,
+		"limitburst_xp": 0,
+		"is_locked": false,
+		"trust_reward_claimed": false
+	}
+
+## Hands over a unit the main story gives (StoryUnits holds the join points). One
+## copy per unit id: a player who already pulled that unit keeps the one they have.
+func grant_story_unit(unit_id: String, level: int = 1, source_event: String = "story_unit") -> Dictionary:
+	if unit_id.strip_edges() == "":
+		return {"success": false, "reason": "missing_unit_id"}
+	for owned in owned_units_ids:
+		if owned is Dictionary and str(owned.get("unit_id", "")) == unit_id:
+			return {"success": false, "reason": "already_owned", "unit_id": unit_id}
+
+	var instance_id: String = "story_%s" % unit_id
+	var unit: Dictionary = build_story_unit(unit_id, instance_id, level)
+	if unit.is_empty():
+		return {"success": false, "reason": "unknown_unit", "unit_id": unit_id}
+
+	var hydrated: Array = _hydrate_owned_units([unit])
+	if hydrated.is_empty():
+		return {"success": false, "reason": "unknown_unit", "unit_id": unit_id}
+	owned_units_ids.append_array(hydrated)
+	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), source_event)
+	emit_updated()
+
+	var granted: Dictionary = hydrated[0]
+	return {
+		"success": true,
+		"unit_id": unit_id,
+		"instance_id": instance_id,
+		"level": int(granted.get("level", level)),
+		"name": str(granted.get("unitName", unit_id))
+	}
+
+const GACHA_BANNERS_RES_PATH: String = "res://assets/static_data/gacha_banners.json"
+const GACHA_BANNERS_USER_PATH: String = "user://gacha_banners.json"
+
+const LAPIS_COST_SINGLE: int = 100
+const LAPIS_COST_MULTI: int = 1000
+
+const COLOSSEUM_TIER_LABELS: Dictionary = {
+	0: "Unlocked from Start",
+	10101: "BGN Rank D",
+	10201: "BGN Rank C",
+	10301: "BGN Rank B",
+	10401: "BGN Rank A",
+	10501: "BGN Rank S",
+	20101: "INT Rank D",
+	20201: "INT Rank C",
+	20301: "INT Rank B",
+	20401: "INT Rank A",
+	20501: "INT Rank S",
+	30101: "ADV Rank D",
+	30201: "ADV Rank C",
+	30301: "ADV Rank B",
+	30401: "ADV Rank A",
+	30501: "ADV Rank S",
+}
+
+func get_colosseum_round_label(r_id: int) -> String:
+	if r_id <= 0:
+		return "Unlocked from Start"
+	if COLOSSEUM_TIER_LABELS.has(r_id):
+		return str(COLOSSEUM_TIER_LABELS[r_id])
+	var prog: Dictionary = GameDatabase.get_clsm_progress(r_id)
+	if not prog.is_empty():
+		return "%s Rank %s" % [str(prog.get("grade", "BGN")), str(prog.get("rank", "D"))]
+	return "Round %d" % r_id
+
+func get_banner_unlock_status(banner: Dictionary) -> Dictionary:
+	var req_round: int = int(banner.get("unlock_colosseum_round", 0))
+	var cur_round: int = 10101
+	var clsm: Node = get_node_or_null("/root/ColosseumService")
+	if clsm != null:
+		cur_round = maxi(10101, int(clsm.get("round_id")))
+	var is_unlocked: bool = (req_round <= 10101) or (cur_round >= req_round)
+	return {
+		"unlocked": is_unlocked,
+		"required_round": req_round,
+		"current_round": cur_round,
+		"required_label": get_colosseum_round_label(req_round),
+		"current_label": get_colosseum_round_label(cur_round),
+	}
+
+func get_summon_banners() -> Array:
+	var path: String = GACHA_BANNERS_USER_PATH if FileAccess.file_exists(GACHA_BANNERS_USER_PATH) else GACHA_BANNERS_RES_PATH
+	if FileAccess.file_exists(path):
+		var file := FileAccess.open(path, FileAccess.READ)
+		if file != null:
+			var parsed: Variant = JSON.parse_string(file.get_as_text())
+			if parsed is Dictionary and parsed.has("banners") and parsed["banners"] is Array:
+				return parsed["banners"]
+			elif parsed is Array:
+				return parsed
+	return [
+		{
+			"id": "rare_default",
+			"title": "Rare Summon",
+			"subtitle": "Featured Heroes Rate Up!",
+			"category": "rare",
+			"pool_type": "rare",
+			"cost_single": LAPIS_COST_SINGLE,
+			"cost_multi": LAPIS_COST_MULTI,
+			"featured_units": [207000105, 207001005, 206000125],
+			"unit_pool": [],
+			"rates": {"3": 55, "4": 30, "5": 15, "7": 0, "featured_boost": 35},
+			"description": "Summon heroes from across the Final Fantasy series, kupo!"
+		}
+	]
+
+func get_banner_currency(banner: Dictionary) -> String:
+	return str(banner.get("cost_currency", "lapis")).to_lower()
+
+func get_banner_cost(banner: Dictionary, amount: int) -> int:
+	var curr: String = get_banner_currency(banner)
+	var default_single: int = 200 if curr == "gil" else LAPIS_COST_SINGLE
+	var default_multi: int = 2000 if curr == "gil" else LAPIS_COST_MULTI
+	if amount == 1:
+		return int(banner.get("cost_single", default_single))
+	return int(banner.get("cost_multi", default_multi))
+
+func _get_owned_unit_id_set() -> Dictionary:
+	var owned_set: Dictionary = {}
+	for unit_val in owned_units_ids:
+		if unit_val is Dictionary:
+			var uid: int = int(unit_val.get("unit_id", unit_val.get("unitId", 0)))
+			if uid > 0:
+				owned_set[uid] = true
+	return owned_set
+
 func summon_units(amount: int, is_nv: bool = false) -> Dictionary:
 	var summoned_units: Array = []
 	var summonable_units: Array = GameDatabase.get_summonable_units(is_nv)
@@ -119,10 +326,14 @@ func summon_units(amount: int, is_nv: bool = false) -> Dictionary:
 	if summonable_units.is_empty():
 		return {"error": "ERR_NO_UNITS_AVAILABLE"}
 
+	var owned_set: Dictionary = _get_owned_unit_id_set()
 	for _i in range(amount):
 		var random_unit: Dictionary = summonable_units[randi() % summonable_units.size()]
+		var uid: int = int(random_unit.get("unitId", 0))
+		var is_new_unit: bool = not owned_set.has(uid)
+		owned_set[uid] = true
 		var new_instance: Dictionary = {
-			"unit_id": random_unit.get("unitId"),
+			"unit_id": uid,
 			"instance_id": InventoryService.generate_instance_id(),
 			"xp": 0,
 			"level": 1,
@@ -132,7 +343,8 @@ func summon_units(amount: int, is_nv: bool = false) -> Dictionary:
 			"trust_reward_claimed": false,
 			"limitburst_xp": 0,
 			"limitburst_level": 1,
-			"current_rarity": random_unit.get("minRare")
+			"current_rarity": random_unit.get("minRare"),
+			"is_new": is_new_unit
 		}
 		summoned_units.append(new_instance)
 
@@ -141,6 +353,293 @@ func summon_units(amount: int, is_nv: bool = false) -> Dictionary:
 	emit_updated()
 	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "summon_units")
 	return {"summoned": summoned_units}
+
+func summon_from_banner(banner: Dictionary, amount: int = 11) -> Dictionary:
+	var summon_amount: int = maxi(1, amount)
+	var pool_type: String = str(banner.get("pool_type", "all"))
+	var custom_pool_ids: Array = banner.get("unit_pool", []) if banner.get("unit_pool") is Array else []
+	var featured_ids: Array = banner.get("featured_units", []) if banner.get("featured_units") is Array else []
+	var rates: Dictionary = banner.get("rates", {}) if banner.get("rates") is Dictionary else {}
+
+	# Material pool shortcut if custom_pool_ids has fixed material units
+	if pool_type == "material" and not custom_pool_ids.is_empty():
+		var summoned_mat: Array = []
+		var owned_mat_set: Dictionary = _get_owned_unit_id_set()
+		for _i in range(summon_amount):
+			var pick_id: int = int(custom_pool_ids[randi() % custom_pool_ids.size()])
+			var udata: Dictionary = GameDatabase.get_unit(pick_id)
+			if udata.is_empty():
+				continue
+			var is_new_mat: bool = not owned_mat_set.has(pick_id)
+			owned_mat_set[pick_id] = true
+			summoned_mat.append({
+				"unit_id": str(pick_id),
+				"instance_id": InventoryService.generate_instance_id(),
+				"xp": 0,
+				"level": 1,
+				"equipment": {},
+				"is_locked": false,
+				"trust_value": 0,
+				"trust_reward_claimed": false,
+				"limitburst_xp": 0,
+				"limitburst_level": 1,
+				"current_rarity": int(udata.get("rare", 4)),
+				"is_new": is_new_mat
+			})
+		if summoned_mat.is_empty():
+			return {"error": "ERR_NO_UNITS_AVAILABLE"}
+		summoned_mat = _hydrate_owned_units(summoned_mat)
+		owned_units_ids.append_array(summoned_mat)
+		emit_updated()
+		Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "summon_from_banner")
+		return {"summoned": summoned_mat}
+
+	# Build candidate pool
+	var candidates: Array = _get_banner_candidates(banner)
+	if candidates.is_empty():
+		return {"error": "ERR_NO_UNITS_AVAILABLE"}
+
+	# Bucket candidates by rarity: 2 (1★-2★), 3 (3★), 4 (4★), 5 (5★-6★), 7 (NV)
+	var by_rarity: Dictionary = {2: [], 3: [], 4: [], 5: [], 7: []}
+	for c in candidates:
+		var r: int = int(c.get("minRare", 3))
+		if r >= 7 or int(c.get("isNv", 0)) != 0:
+			by_rarity[7].append(c)
+		elif r >= 5:
+			by_rarity[5].append(c)
+		elif r == 4:
+			by_rarity[4].append(c)
+		elif r == 3:
+			by_rarity[3].append(c)
+		else:
+			by_rarity[2].append(c)
+
+	var featured_by_rarity: Dictionary = {2: [], 3: [], 4: [], 5: [], 7: []}
+	var featured_pool: Array = []
+	for fid in featured_ids:
+		var fdata: Dictionary = GameDatabase.get_unit(int(fid))
+		if not fdata.is_empty():
+			var fr: int = int(fdata.get("rare", 5))
+			var fnv: int = int(fdata.get("isNv", 0))
+			var f_entry: Dictionary = {
+				"unitId": int(fdata.get("unitId", fid)),
+				"unitName": str(fdata.get("unitName", "")),
+				"minRare": fr,
+				"isNv": fnv
+			}
+			featured_pool.append(f_entry)
+			var f_bucket_key: int = 7 if (fr >= 7 or fnv != 0) else (5 if fr >= 5 else (4 if fr == 4 else (3 if fr == 3 else 2)))
+			featured_by_rarity[f_bucket_key].append(f_entry)
+
+	var featured_boost: int = int(rates.get("featured_boost", 35))
+	var w12: int = maxi(0, int(rates.get("1_2", rates.get("2", 0)))) if not by_rarity[2].is_empty() else 0
+	var w3: int = maxi(0, int(rates.get("3", 50))) if not by_rarity[3].is_empty() else 0
+	var w4: int = maxi(0, int(rates.get("4", 35))) if not by_rarity[4].is_empty() else 0
+	var w5: int = maxi(0, int(rates.get("5", 10))) if not by_rarity[5].is_empty() else 0
+	var w7: int = maxi(0, int(rates.get("7", 5))) if not by_rarity[7].is_empty() else 0
+
+	var summoned_units: Array = []
+	var owned_set: Dictionary = _get_owned_unit_id_set()
+
+	for i in range(summon_amount):
+		var chosen: Dictionary = {}
+		var is_plus_one: bool = (summon_amount >= 11 and i == summon_amount - 1)
+
+		# Step 1: Roll rarity tier strictly from room drop rates
+		# On +1 bonus slot of 10+1, drop the lowest tier (1-2★ or 3★ if no 1-2★)
+		var cur_w12: int = 0 if is_plus_one else w12
+		var cur_w3: int = (0 if (is_plus_one and w12 == 0 and (w4 + w5 + w7) > 0) else w3)
+		var total_w: int = cur_w12 + cur_w3 + w4 + w5 + w7
+		var target_r: int = 3
+		if total_w > 0:
+			var roll: int = randi() % total_w
+			if roll < cur_w12:
+				target_r = 2
+			elif roll < cur_w12 + cur_w3:
+				target_r = 3
+			elif roll < cur_w12 + cur_w3 + w4:
+				target_r = 4
+			elif roll < cur_w12 + cur_w3 + w4 + w5:
+				target_r = 5
+			else:
+				target_r = 7
+
+		# Step 2: Check featured rate-up within the rolled rarity tier
+		var eff_boost: int = mini(90, featured_boost + 25) if is_plus_one else featured_boost
+		var tier_featured: Array = featured_by_rarity.get(target_r, [])
+		if not tier_featured.is_empty() and (randi() % 100) < eff_boost:
+			chosen = tier_featured[randi() % tier_featured.size()]
+		else:
+			var bucket: Array = by_rarity.get(target_r, [])
+			if bucket.is_empty():
+				if w4 > 0 and not by_rarity[4].is_empty():
+					bucket = by_rarity[4]
+				elif w3 > 0 and not by_rarity[3].is_empty():
+					bucket = by_rarity[3]
+				elif w12 > 0 and not by_rarity[2].is_empty():
+					bucket = by_rarity[2]
+			if bucket.is_empty():
+				chosen = candidates[randi() % candidates.size()]
+			else:
+				chosen = bucket[randi() % bucket.size()]
+
+		var uid: int = int(chosen.get("unitId", 0))
+		var is_new_unit: bool = not owned_set.has(uid)
+		owned_set[uid] = true
+		summoned_units.append({
+			"unit_id": uid,
+			"instance_id": InventoryService.generate_instance_id(),
+			"xp": 0,
+			"level": 1,
+			"equipment": {},
+			"is_locked": false,
+			"trust_value": 0,
+			"trust_reward_claimed": false,
+			"limitburst_xp": 0,
+			"limitburst_level": 1,
+			"current_rarity": int(chosen.get("minRare", 3)),
+			"is_new": is_new_unit
+		})
+
+	# Step 3: Increment Pity Counter for this banner (10+1 counts as 10 pulls, 1x counts as 1; 10 multi-pulls = 100)
+	var banner_id: String = str(banner.get("id", "default"))
+	var pity_pulls: int = int(banner.get("pity_pulls", 100))
+	if pity_pulls > 0:
+		var add_pulls: int = 10 if summon_amount == 11 else summon_amount
+		banner_pity_counts[banner_id] = int(banner_pity_counts.get(banner_id, 0)) + add_pulls
+
+	summoned_units = _hydrate_owned_units(summoned_units)
+	owned_units_ids.append_array(summoned_units)
+	emit_updated()
+	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "summon_from_banner")
+	return {"summoned": summoned_units}
+
+
+func _get_banner_candidates(banner: Dictionary) -> Array:
+	var pool_type: String = str(banner.get("pool_type", "all"))
+	var custom_pool_ids: Array = banner.get("unit_pool", []) if banner.get("unit_pool") is Array else []
+	var candidates: Array = []
+	if not custom_pool_ids.is_empty():
+		for raw_id in custom_pool_ids:
+			var udata: Dictionary = GameDatabase.get_unit(int(raw_id))
+			if not udata.is_empty():
+				candidates.append({
+					"unitId": int(udata.get("unitId", raw_id)),
+					"unitName": str(udata.get("unitName", "")),
+					"minRare": int(udata.get("rare", 3)),
+					"isNv": int(udata.get("isNv", 0))
+				})
+	else:
+		if pool_type == "nv":
+			candidates = GameDatabase.get_summonable_units(true)
+		elif pool_type == "rare":
+			candidates = GameDatabase.get_summonable_units(false)
+		else:
+			candidates = GameDatabase.get_summonable_units(false) + GameDatabase.get_summonable_units(true)
+	return candidates
+
+
+func get_banner_pity_info(banner: Dictionary) -> Dictionary:
+	var pool_type: String = str(banner.get("pool_type", "all"))
+	if pool_type == "material":
+		return {"enabled": false, "current": 0, "required": 0, "pity_rarity": 4, "can_claim": false}
+	var banner_id: String = str(banner.get("id", "default"))
+	var pity_pulls: int = int(banner.get("pity_pulls", 100))
+	var pity_rarity: int = int(banner.get("pity_rarity", 4))
+	var current: int = int(banner_pity_counts.get(banner_id, 0))
+	return {
+		"enabled": pity_pulls > 0,
+		"current": current,
+		"required": pity_pulls,
+		"pity_rarity": pity_rarity,
+		"can_claim": pity_pulls > 0 and current >= pity_pulls,
+	}
+
+
+func get_banner_selectable_units(banner: Dictionary) -> Array:
+	var pity_rarity: int = int(banner.get("pity_rarity", 4))
+	var featured_ids: Array = banner.get("featured_units", []) if banner.get("featured_units") is Array else []
+	var featured_set: Dictionary = {}
+	for fid in featured_ids:
+		featured_set[int(fid)] = true
+
+	var candidates: Array = _get_banner_candidates(banner)
+	var seen_ids: Dictionary = {}
+	var matched: Array = []
+
+	# First add featured units matching pity_rarity (or all featured if none match exact)
+	for fid in featured_ids:
+		var f_id: int = int(fid)
+		var fdata: Dictionary = GameDatabase.get_unit(f_id)
+		if fdata.is_empty():
+			continue
+		var fr: int = int(fdata.get("rare", 4))
+		var fnv: int = int(fdata.get("isNv", 0))
+		var eff_r: int = 7 if (fr >= 7 or fnv != 0) else (5 if fr >= 5 else fr)
+		if eff_r == pity_rarity:
+			seen_ids[f_id] = true
+			matched.append({
+				"unitId": f_id,
+				"unitName": str(fdata.get("unitName", "")),
+				"minRare": fr,
+				"isNv": fnv,
+				"is_featured": true,
+			})
+
+	for c in candidates:
+		var uid: int = int(c.get("unitId", 0))
+		if uid <= 0 or seen_ids.has(uid):
+			continue
+		var r: int = int(c.get("minRare", 3))
+		var is_nv: int = int(c.get("isNv", 0))
+		var eff_r: int = 7 if (r >= 7 or is_nv != 0) else (5 if r >= 5 else r)
+		if eff_r == pity_rarity:
+			seen_ids[uid] = true
+			matched.append({
+				"unitId": uid,
+				"unitName": str(c.get("unitName", "")),
+				"minRare": r,
+				"isNv": is_nv,
+				"is_featured": featured_set.has(uid),
+			})
+
+	return matched
+
+
+func claim_banner_pity_unit(banner: Dictionary, chosen_unit_id: int) -> Dictionary:
+	var info: Dictionary = get_banner_pity_info(banner)
+	if not bool(info.get("can_claim", false)):
+		return {"error": "ERR_PITY_NOT_READY"}
+
+	var udata: Dictionary = GameDatabase.get_unit(chosen_unit_id)
+	if udata.is_empty():
+		return {"error": "ERR_UNIT_NOT_FOUND"}
+
+	var banner_id: String = str(banner.get("id", "default"))
+	var req: int = maxi(1, int(info.get("required", 10)))
+	banner_pity_counts[banner_id] = maxi(0, int(banner_pity_counts.get(banner_id, 0)) - req)
+
+	var owned_set: Dictionary = _get_owned_unit_id_set()
+	var is_new_unit: bool = not owned_set.has(chosen_unit_id)
+	var new_instance: Dictionary = {
+		"unit_id": chosen_unit_id,
+		"instance_id": InventoryService.generate_instance_id(),
+		"xp": 0,
+		"level": 1,
+		"equipment": {},
+		"is_locked": false,
+		"trust_value": 0,
+		"trust_reward_claimed": false,
+		"limitburst_xp": 0,
+		"limitburst_level": 1,
+		"current_rarity": int(udata.get("rare", 4)),
+		"is_new": is_new_unit
+	}
+	var hydrated: Array = _hydrate_owned_units([new_instance])
+	owned_units_ids.append_array(hydrated)
+	emit_updated()
+	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "claim_banner_pity_unit")
+	return {"summoned": hydrated}
 
 func summon_exp_boost_units(amount: int = 3) -> Dictionary:
 	return _summon_fixed_units("900020401", amount, "summon_exp_boost_units")
@@ -202,6 +701,82 @@ func award_battle_exp(instance_ids: Array, exp_amount: int) -> Dictionary:
 
 	emit_updated()
 	Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "award_battle_exp")
+	return {"success": true, "awarded": awarded}
+
+
+## Awards battle trust to party members who completed a mission.
+## Following authentic FFBE rules, each participating unit rolls a 10% chance
+## (BATTLE_TRUST_CHANCE) to gain +0.1% Trust (BATTLE_TRUST_GAIN).
+## When a unit reaches 100.0% trust, their Trust Mastery Reward (TMR) is granted to inventory.
+## Returns { success: bool, awarded: Array }
+func award_battle_trust(instance_ids: Array, chance: float = BATTLE_TRUST_CHANCE, gain: float = BATTLE_TRUST_GAIN, rng: RandomNumberGenerator = null) -> Dictionary:
+	if instance_ids.is_empty():
+		return {"success": true, "awarded": []}
+
+	var roller: RandomNumberGenerator = rng if rng != null else RandomNumberGenerator.new()
+	if rng == null:
+		roller.randomize()
+
+	var target_ids: Dictionary = {}
+	for id_value in instance_ids:
+		var instance_id: String = str(id_value)
+		if instance_id != "":
+			target_ids[instance_id] = true
+	if target_ids.is_empty():
+		return {"success": true, "awarded": []}
+
+	var awarded: Array = []
+	var any_tmr_granted: bool = false
+
+	for unit_value in owned_units_ids:
+		if not (unit_value is Dictionary):
+			continue
+		var unit: Dictionary = unit_value
+		var inst_id: String = str(unit.get("instance_id", ""))
+		if not target_ids.has(inst_id):
+			continue
+		if int(unit.get("jobId", 0)) in MATERIAL_UNIT_JOB_IDS:
+			continue
+
+		var current_trust: float = float(unit.get("trust_value", 0.0))
+		if current_trust >= ENHANCE_MAX_TRUST_VALUE:
+			continue
+
+		if roller.randf() < chance:
+			var new_trust: float = minf(ENHANCE_MAX_TRUST_VALUE, snappedf(current_trust + gain, 0.1))
+			unit["trust_value"] = new_trust
+			var tmr_info: Dictionary = {}
+
+			if new_trust >= ENHANCE_MAX_TRUST_VALUE and not bool(unit.get("trust_reward_claimed", false)):
+				var unit_data: Dictionary = GameDatabase.get_unit(_unit_template_id(unit))
+				var reward_info: Dictionary = _resolve_trust_reward(unit_data)
+				if reward_info.has("template_id"):
+					var reward_type: String = str(reward_info.get("reward_type", ""))
+					var reward_template_id: String = str(reward_info.get("template_id", ""))
+					var grant_result: Dictionary = InventoryService.grant_instanced_items(reward_type, reward_template_id, 1)
+					if bool(grant_result.get("success", false)):
+						unit["trust_reward_claimed"] = true
+						tmr_info = {
+							"reward_type": reward_type,
+							"template_id": reward_template_id,
+							"quantity": 1,
+						}
+						any_tmr_granted = true
+
+			awarded.append({
+				"instance_id": inst_id,
+				"trust_before": current_trust,
+				"trust_after": new_trust,
+				"gain": gain,
+				"tmr_granted": tmr_info,
+			})
+
+	if not awarded.is_empty():
+		emit_updated()
+		Persistence.save_snapshot(SNAPSHOT_FILE, snapshot_payload(), "award_battle_trust")
+		if any_tmr_granted:
+			InventoryService.emit_updated()
+
 	return {"success": true, "awarded": awarded}
 
 func calculate_next_xp_for_unit(unit_inst: Dictionary) -> int:
@@ -825,8 +1400,12 @@ func _summon_fixed_units(unit_id: String, amount: int, source_event: String) -> 
 	var summon_amount: int = maxi(1, amount)
 	var summoned_units: Array = []
 	var initial_rarity: int = unit_data.get("rare")
+	var owned_set: Dictionary = _get_owned_unit_id_set()
+	var uid_int: int = int(unit_id)
 
 	for _i in range(summon_amount):
+		var is_new_unit: bool = not owned_set.has(uid_int)
+		owned_set[uid_int] = true
 		var new_instance: Dictionary = {
 			"unit_id": unit_id,
 			"instance_id": InventoryService.generate_instance_id(),
@@ -839,6 +1418,7 @@ func _summon_fixed_units(unit_id: String, amount: int, source_event: String) -> 
 			"limitburst_xp": 0,
 			"limitburst_level": 1,
 			"current_rarity": initial_rarity,
+			"is_new": is_new_unit,
 		}
 		summoned_units.append(new_instance)
 
@@ -927,21 +1507,22 @@ func _resolve_trust_reward(unit_data: Dictionary) -> Dictionary:
 	if unit_data.is_empty():
 		return {"error": "Missing unit static data for trust reward"}
 
-	var tmr_value: Variant = unit_data.get("trustMasterReward", null)
-	tmr_value = tmr_value.split(":")
-	if tmr_value.size() >= 2 and tmr_value[1] != null:
-		var reward_type: String = str(tmr_value[0])
-		var reward_id: String = str(tmr_value[1])
-		if reward_type == "21":
-			if GameDatabase.get_equipment(reward_id).is_empty():
-				return {"error": "Trust reward equipment template not found"}
-			return {"reward_type": "EQUIP", "template_id": reward_id}
-		elif reward_type == "22":
-			if GameDatabase.get_materia(int(reward_id)).is_empty():
-				return {"error": "Trust reward materia template not found"}
-			return {"reward_type": "MATERIA", "template_id": reward_id}
-		else:
-			return {"error": "Unsupported trust reward type: %s" % reward_type}
+	var tmr_raw: Variant = unit_data.get("trustMasterReward", null)
+	if tmr_raw != null and (tmr_raw is String):
+		var tmr_value: PackedStringArray = (tmr_raw as String).split(":")
+		if tmr_value.size() >= 2 and tmr_value[1] != "":
+			var reward_type: String = str(tmr_value[0])
+			var reward_id: String = str(tmr_value[1])
+			if reward_type == "21":
+				if GameDatabase.get_equipment(reward_id).is_empty():
+					return {"error": "Trust reward equipment template not found"}
+				return {"reward_type": "EQUIP", "template_id": reward_id}
+			elif reward_type == "22":
+				if GameDatabase.get_materia(int(reward_id)).is_empty():
+					return {"error": "Trust reward materia template not found"}
+				return {"reward_type": "MATERIA", "template_id": reward_id}
+			else:
+				return {"error": "Unsupported trust reward type: %s" % reward_type}
 
 	var trust_mastery_id: String = str(unit_data.get("trust_mastery_id", ""))
 	if trust_mastery_id != "":

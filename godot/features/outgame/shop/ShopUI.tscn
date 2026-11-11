@@ -1,9 +1,10 @@
 [gd_scene format=3 uid="uid://gqakqdyq272g"]
 
 [ext_resource type="Script" uid="uid://b2mr0adket8cd" path="res://features/outgame/shop/shop_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://dntla4oacfeg8" path="res://assets/ui/common/common_bg.png" id="2_bg"]
 [ext_resource type="Texture2D" uid="uid://dmunqh6phrvfg" path="res://assets/ui/create/cre_btn4_1.tres" id="2_y08we"]
 [ext_resource type="Texture2D" uid="uid://dn5ikad3sia4y" path="res://assets/ui/create/cre_btn4_2.tres" id="3_1fev2"]
-[ext_resource type="Texture2D" uid="uid://dyk2312wm3mas" path="res://assets/ui/common/search_bar.tres" id="4_1fev2"]
+[ext_resource type="Texture2D" uid="uid://b0teemvdwn55d" path="res://assets/ui/common/search_bar.tres" id="4_1fev2"]
 
 [node name="ShopUI" type="Control" unique_id=679947962]
 layout_mode = 3
@@ -14,6 +15,10 @@ offset_top = 120.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
+
+[node name="CommonBg2" type="Sprite2D" parent="." unique_id=109487915]
+position = Vector2(320, 448)
+texture = ExtResource("2_bg")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=180950207]
 layout_mode = 1

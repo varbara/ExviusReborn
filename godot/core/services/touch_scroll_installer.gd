@@ -21,8 +21,10 @@ func _ready() -> void:
 
 func _on_node_added(node: Node) -> void:
 	if node is ScrollContainer:
-		# Defer so the ScrollContainer finishes its own _ready first.
-		_attach.call_deferred(node)
+		if node.is_node_ready():
+			_attach(node)
+		else:
+			node.ready.connect(_attach.bind(node), CONNECT_ONE_SHOT)
 
 
 func _scan(root: Node) -> void:
@@ -32,8 +34,8 @@ func _scan(root: Node) -> void:
 		_scan(child)
 
 
-func _attach(sc: ScrollContainer) -> void:
-	if not is_instance_valid(sc) or not sc.is_inside_tree():
+func _attach(sc: Variant) -> void:
+	if not is_instance_valid(sc) or not (sc is ScrollContainer) or not sc.is_inside_tree():
 		return
 	if sc.has_meta("skip_touch_drag") and sc.get_meta("skip_touch_drag"):
 		return
@@ -42,5 +44,5 @@ func _attach(sc: ScrollContainer) -> void:
 	var helper: Node = Node.new()
 	helper.name = _HELPER_NAME
 	helper.set_script(_TouchDragScrollScript)
-	sc.add_child(helper)
+	sc.add_child(helper, false, Node.INTERNAL_MODE_BACK)
 	_attached_count += 1

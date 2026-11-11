@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://bdg8hwlg1goid"]
 
 [ext_resource type="Script" uid="uid://c4pnehjhbm32a" path="res://features/outgame/espers/summon_board_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://xf4eg374qsit" path="res://assets/ui/beast/sumboard_bg.tres" id="2_lo2hk"]
 [ext_resource type="Texture2D" uid="uid://dqyoxye41actf" path="res://assets/ui/unit/unit_namebg_chara.tres" id="2_74yb0"]
 [ext_resource type="Texture2D" uid="uid://cwfwqmc3kgvr3" path="res://assets/ui/beast/sumboard_arrow_rt.tres" id="2_b8y5j"]
 [ext_resource type="Texture2D" uid="uid://djms524f3tntn" path="res://assets/ui/beast/sumboard_arrow_lt.tres" id="3_ecqil"]
@@ -26,6 +27,15 @@ offset_top = 120.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
+
+[node name="summon_board_bg" type="TextureRect" parent="." unique_id=51199357]
+layout_mode = 0
+offset_left = -140.0
+offset_top = -60.0
+offset_right = 780.0
+offset_bottom = 860.0
+texture = ExtResource("2_lo2hk")
+stretch_mode = 2
 
 [node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=524911985]
 layout_mode = 1

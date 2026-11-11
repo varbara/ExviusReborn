@@ -40,7 +40,13 @@
 
 [node name="AbilityAwakening" type="Control" unique_id=1935544331]
 layout_mode = 3
-anchors_preset = 0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 640.0
+offset_bottom = 960.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_s46q2")
 
 [node name="CommonBg2" type="Sprite2D" parent="." unique_id=1511926807]

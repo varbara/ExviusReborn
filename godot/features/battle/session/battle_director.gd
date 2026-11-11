@@ -177,6 +177,16 @@ func debug_finish() -> void:
 	_complete_mission()
 
 
+## The battle menu's Give Up: the loss path at once, the same one a wiped party takes
+## (_end_battle with anything but a victory). Does nothing once the battle is over.
+func give_up() -> void:
+	if _finished or session == null or session.engine == null:
+		return
+	_finished = true
+	challenges.cleanup()
+	finisher.call(false, mission_id, ledger.used_items.duplicate(), [], [], 0, 0)
+
+
 ## Whether the mission has been reported (or is being wrapped up).
 func is_finished() -> bool:
 	return _finished

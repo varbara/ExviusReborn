@@ -5,6 +5,27 @@ const TILE_ATLAS_COORD: Vector2i = Vector2i(0, 0)
 const TILE_SIZE: int = 100
 const CLICK_DRAG_THRESHOLD: float = 8.0
 
+const BG_START = preload("res://assets/ui/beast/sumborad_center.tres")
+const BG_ATTACK = preload("res://assets/ui/beast/sumboard_gridbg_attack.tres")
+const BG_ATTACK_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_attack_learned.tres")
+const BG_DEF = preload("res://assets/ui/beast/sumboard_gridbg_deffence.tres")
+const BG_DEF_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_deffence_learned.tres")
+const BG_HP = preload("res://assets/ui/beast/sumboard_gridbg_hp.tres")
+const BG_HP_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_hp_learned.tres")
+const BG_MP = preload("res://assets/ui/beast/sumboard_gridbg_mp.tres")
+const BG_MP_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_mp_learned.tres")
+const BG_MAGIC = preload("res://assets/ui/beast/sumboard_gridbg_magic.tres")
+const BG_MAGIC_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_magic_learned.tres")
+const BG_MIND = preload("res://assets/ui/beast/sumboard_gridbg_mind.tres")
+const BG_MIND_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_mind_learned.tres")
+const BG_SPELL = preload("res://assets/ui/beast/sumboard_gridbg_magicspell.tres")
+const BG_SPELL_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_magicspell_learned.tres")
+const BG_SPECIAL = preload("res://assets/ui/beast/sumboard_gridbg_special.tres")
+const BG_SPECIAL_LEARNED = preload("res://assets/ui/beast/sumboard_gridbg_special_learned.tres")
+
+const FRAME_DEFAULT = preload("res://assets/ui/beast/sumboard_gridframe_rank1.tres")
+const FRAME_LEARNED = preload("res://assets/ui/beast/sumboard_gridframe_learned_rank1.tres")
+
 @onready var back_button: TextureButton = $VBoxContainer/UnitNamebgChara2/BackButton
 @onready var title_label: Label = $VBoxContainer/UnitNamebgChara2/Title
 @onready var tile_map_layer: TileMapLayer = $TileMapLayer
@@ -201,22 +222,57 @@ func _render_board() -> void:
 		var state: String = str(node_data.get("_computed_state", "unreachable"))
 		node_control.set_meta("node_state", state)
 
+		var piece_type: int = int(node_data.get("pieceType", -1))
+		var is_learned: bool = state in ["learned", "start"]
+
+		# Authentic Hexagonal Background Texture
+		var bg_rect := TextureRect.new()
+		bg_rect.size = Vector2(TILE_SIZE, TILE_SIZE)
+		bg_rect.position = Vector2.ZERO
+		bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		bg_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		bg_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bg_rect.texture = _get_node_bg_texture(piece_type, is_learned)
+		node_control.add_child(bg_rect)
+
+		# Authentic Hexagonal Frame Texture
+		var frame_rect := TextureRect.new()
+		frame_rect.size = Vector2(TILE_SIZE, TILE_SIZE)
+		frame_rect.position = Vector2.ZERO
+		frame_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		frame_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		frame_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame_rect.texture = FRAME_LEARNED if is_learned else FRAME_DEFAULT
+		node_control.add_child(frame_rect)
+
+		# State tint modulation
+		if is_learned:
+			bg_rect.modulate = Color(1.0, 1.0, 1.0, 1.0)
+			frame_rect.modulate = Color(1.0, 0.96, 0.6, 1.0)
+		elif state == "learnable":
+			bg_rect.modulate = Color(1.0, 1.0, 1.0, 1.0)
+			frame_rect.modulate = Color(0.4, 0.9, 1.0, 1.0)
+		else: # unreachable
+			bg_rect.modulate = Color(0.45, 0.48, 0.55, 0.75)
+			frame_rect.modulate = Color(0.5, 0.52, 0.58, 0.75)
+
 		# Color state is represented by node text color.
 		var text_color: Color = _get_node_color(state)
 		
 		# Create label for reward text
 		var lbl := Label.new()
-		lbl.text = _format_reward(node_data)
+		lbl.text = _format_reward(node_data, state)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.add_theme_font_size_override("font_size", 11)
 		lbl.add_theme_color_override("font_color", text_color)
 		lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-		lbl.add_theme_constant_override("outline_size", 3)
+		lbl.add_theme_constant_override("outline_size", 4)
 		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Allow input to pass through
+		lbl.size = Vector2(TILE_SIZE - 12, TILE_SIZE - 12)
+		lbl.position = Vector2(6, 6)
 		node_control.add_child(lbl)
-		lbl.size = node_control.size
-		lbl.position = Vector2.ZERO
 		
 		# ESPER TRAINING: Add click handler for learnable and start nodes
 		if state in ["learnable", "start"]:
@@ -257,7 +313,23 @@ func _render_board() -> void:
 	sp_label.text = str(int(progression.get("current_sp", 0)))
 
 
-func _format_reward(node_data: Dictionary) -> String:
+func _get_node_bg_texture(piece_type: int, is_learned: bool) -> Texture2D:
+	if piece_type == 0:
+		return BG_START
+	match piece_type:
+		10: return BG_HP_LEARNED if is_learned else BG_HP
+		11: return BG_MP_LEARNED if is_learned else BG_MP
+		12: return BG_ATTACK_LEARNED if is_learned else BG_ATTACK
+		13: return BG_DEF_LEARNED if is_learned else BG_DEF
+		14: return BG_MAGIC_LEARNED if is_learned else BG_MAGIC
+		15: return BG_MIND_LEARNED if is_learned else BG_MIND
+		20: return BG_SPELL_LEARNED if is_learned else BG_SPELL
+		21, 100, 101, 102, 103, 104, 105, 106, 107:
+			return BG_SPECIAL_LEARNED if is_learned else BG_SPECIAL
+		_:
+			return BG_SPECIAL_LEARNED if is_learned else BG_SPECIAL
+
+func _format_reward(node_data: Dictionary, state: String = "") -> String:
 	var piece_type: int = int(node_data.get("pieceType", -1))
 	var piece_param: int = int(node_data.get("pieceParam", 0))
 	var sp_cost: int = int(node_data.get("costSp", 0))
@@ -284,44 +356,35 @@ func _format_reward(node_data: Dictionary) -> String:
 	elif piece_type == 107: reward_type = "Dark Resist"
 	else: reward_type = "UNKNOWN"
 
+	var label_name: String = ""
 	if reward_type == "ABILITY":
 		# Check active abilities first
 		var skill_data: Dictionary = GameDatabase.get_ability(str(piece_param))
 		if not skill_data.is_empty():
-			var skill_name: String = str(skill_data.get("name", str(piece_param)))
-			if sp_cost > 0:
-				return "%s
-%d SP" % [skill_name, sp_cost]
-			return skill_name
-		# Then check passive abilities
-		skill_data = GameDatabase.get_passive(str(piece_param))
-		if not skill_data.is_empty():
-			var skill_name: String = str(skill_data.get("name", str(piece_param)))
-			if sp_cost > 0:
-				return "%s
-%d SP" % [skill_name, sp_cost]
-			return skill_name
-			
+			label_name = str(skill_data.get("name", str(piece_param)))
+		else:
+			# Then check passive abilities
+			skill_data = GameDatabase.get_passive(str(piece_param))
+			if not skill_data.is_empty():
+				label_name = str(skill_data.get("name", str(piece_param)))
+			else:
+				label_name = "Ability %s" % piece_param
 	elif reward_type == "MAGIC":
 		var skill_data: Dictionary = GameDatabase.get_magic(str(piece_param))
 		if not skill_data.is_empty():
-			var skill_name: String = str(skill_data.get("name", str(piece_param)))
-			if sp_cost > 0:
-				return "%s
-%d SP" % [skill_name, sp_cost]
-			return skill_name
-	
-	# Fall back to stat rewards format (ATK +5 on line 1, SP cost on line 2)
-	if sp_cost > 0:
-		if "Resist" in reward_type:
-			return "%s %d%%
-%d SP" % [reward_type, piece_param, sp_cost]
-		return "%s +%d
-%d SP" % [reward_type, piece_param, sp_cost]
-	
-	if "Resist" in reward_type:
-		return "%s %d%%" % [reward_type, piece_param]
-	return "%s +%d" % [reward_type, piece_param]
+			label_name = str(skill_data.get("name", str(piece_param)))
+		else:
+			label_name = "Magic %s" % piece_param
+	elif "Resist" in reward_type:
+		label_name = "%s %d%%" % [reward_type, piece_param]
+	else:
+		label_name = "%s +%d" % [reward_type, piece_param]
+
+	if state in ["learned", "start"]:
+		return "%s\n[ปลดแล้ว]" % label_name
+	elif sp_cost > 0:
+		return "%s\n%d SP" % [label_name, sp_cost]
+	return label_name
 
 func _get_node_state(node_id: String) -> String:
 	# Now rely on computed state
@@ -330,15 +393,14 @@ func _get_node_state(node_id: String) -> String:
 
 func _get_node_color(state: String) -> Color:
 	match state:
-		"learned":
-			return Color.GREEN
+		"learned", "start":
+			return Color(1.0, 0.95, 0.55)  # Bright gold / warm yellow
 		"learnable":
-			return Color(0.0, 0.5, 1.0)  # Blue
-		"start":
-			return Color.GREEN  # START nodes appear as learned (always available)
+			return Color(0.4, 0.95, 1.0)  # Bright cyan
 		"unreachable":
-			return Color(0.5, 0.5, 0.5)  # Grey
-	return Color.WHITE
+			return Color(0.9, 0.92, 0.96)  # Crisp soft white with dark outline
+		_:
+			return Color.WHITE
 
 func _get_node_reward_skill_id(node_data: Dictionary) -> String:
 	var piece_type: int = int(node_data.get("pieceType", -1))

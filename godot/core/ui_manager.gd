@@ -39,7 +39,8 @@ var _scenes_map: Dictionary = {
 	"cutscene_ui": "res://features/event/CutsceneScreen.tscn",
 	"settings_ui": "res://features/outgame/profile/SettingsUI.tscn",
 	"vortex_dungeon_ui": "res://features/outgame/vortex/vortex_dungeon.tscn",
-	"colosseum_ui": "res://features/outgame/colosseum/Colosseum.tscn"
+	"colosseum_ui": "res://features/outgame/colosseum/Colosseum.tscn",
+	"recollection_ui": "res://features/outgame/recollection/RecollectionScreen.tscn"
 }
 
 # === BGM routing ===
@@ -124,11 +125,11 @@ func _update_overlays() -> void:
 
 	# Enforce persistent nodes stay on top by moving them to end
 	if top_header and top_header.get_parent():
-		canvas_layer.move_child(top_header, -1)
+		canvas_layer.move_child.call_deferred(top_header, -1)
 	if bottom_nav and bottom_nav.get_parent():
-		canvas_layer.move_child(bottom_nav, -1)
+		canvas_layer.move_child.call_deferred(bottom_nav, -1)
 	if home_buttons and home_buttons.get_parent():
-		canvas_layer.move_child(home_buttons, -1)
+		canvas_layer.move_child.call_deferred(home_buttons, -1)
 
 	_update_bgm(current_scene_name)
 
@@ -139,6 +140,8 @@ func _update_bgm(scene_key: String) -> void:
 		return
 	if get_node_or_null("/root/AudioService") == null:
 		return
+	if scene_key != "cutscene_ui" and AudioService.is_ambient_playing():
+		AudioService.stop_ambient(0.5)
 	var path: String = _bgm_for_scene.get(scene_key, BGM_MAIN)
 	if path == BGM_NONE:
 		return

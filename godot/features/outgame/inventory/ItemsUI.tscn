@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://bqjc8qvkcjgjr"]
 
 [ext_resource type="Script" uid="uid://cujpdca08xajr" path="res://features/outgame/inventory/items_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://dntla4oacfeg8" path="res://assets/ui/common/common_bg.png" id="2_bg"]
 [ext_resource type="Texture2D" uid="uid://cyo1su671dmm5" path="res://assets/ui/common/bottomline.tres" id="2_3pvk7"]
 [ext_resource type="Texture2D" uid="uid://bc5s030hkaxtr" path="res://assets/ui/item/item_bg.tres" id="3_sc7kn"]
 [ext_resource type="Texture2D" uid="uid://c4j6yu6c2jjo8" path="res://assets/ui/item/item_slot_unset.tres" id="4_nc4ov"]
@@ -26,6 +27,10 @@ offset_top = 120.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
+
+[node name="CommonBg2" type="Sprite2D" parent="." unique_id=109487915]
+position = Vector2(320, 448)
+texture = ExtResource("2_bg")
 
 [node name="line_top" type="TextureRect" parent="." unique_id=432024792]
 layout_mode = 0

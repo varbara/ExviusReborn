@@ -161,3 +161,32 @@ func test_the_attack_command_runs_the_replacement_for_free() -> void:
 	Fixtures.run_until(battle, func() -> bool: return not Fixtures.hits(battle, foe.id).is_empty())
 	assert_eq(Fixtures.amounts(Fixtures.hits(battle, foe.id)), [200], "the replacement's 200% modifier")
 	assert_eq(hero.mp, 50, "an attack costs no MP, whatever the ability's cost")
+
+
+func test_lb_crystal_distribution_prioritizes_party_members_with_incomplete_gauge() -> void:
+	var rules: BattleRules = Fixtures.rules()
+	rules.lb_crystal_drop_chance = 1.0
+	var hero_full: Combatant = _unit("Full", {}, {"max_lb": 1000, "attack_frames": "4:100"})
+	hero_full.lb = 1000
+	var hero_needy: Combatant = _unit("Needy", {}, {"max_lb": 1000, "attack_frames": "4:100"})
+	hero_needy.lb = 0
+	var battle: BattleEngine = Fixtures.engine([hero_full, hero_needy], [Fixtures.monster("Foe")], rules)
+	battle.start()
+	battle.execute(hero_full.id)
+	Fixtures.run_until(battle, func() -> bool: return not battle.events.of_type(BattleEventLog.LB_CRYSTAL_DROPPED).is_empty())
+	var dropped: Dictionary = battle.events.last_of_type(BattleEventLog.LB_CRYSTAL_DROPPED)
+	assert_eq(int(dropped["target"]), hero_needy.id, "crystal goes to the needy hero instead of the full hero")
+	assert_true(hero_needy.lb > 0, "needy hero's LB increased")
+
+
+func test_overkill_hits_generate_lb_crystals() -> void:
+	var rules: BattleRules = Fixtures.rules()
+	rules.lb_crystal_drop_chance = 1.0
+	var hero: Combatant = _unit("Hero", {}, {"max_lb": 1000, "attack_frames": "4:50-10:50"})
+	var foe: Combatant = Fixtures.monster("Foe", {"hp": 1})
+	var battle: BattleEngine = Fixtures.engine([hero], [foe], rules)
+	battle.start()
+	battle.execute(hero.id)
+	Fixtures.run_until(battle, func() -> bool: return battle.phase == BattleEngine.Phase.ENDED)
+	var drops: Array[Dictionary] = battle.events.of_type(BattleEventLog.LB_CRYSTAL_DROPPED)
+	assert_eq(drops.size(), 2, "both lethal hit and overkill hit dropped a crystal")

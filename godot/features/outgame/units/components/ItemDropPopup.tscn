@@ -1,0 +1,115 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://features/outgame/units/components/item_drop_popup.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_drop_panel"]
+bg_color = Color(0.07, 0.1, 0.16, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.75, 0.35, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+expand_margin_left = 12.0
+expand_margin_top = 12.0
+expand_margin_right = 12.0
+expand_margin_bottom = 12.0
+
+[node name="ItemDropPopup" type="Control" unique_id=741852963]
+visible = false
+layout_mode = 3
+anchors_preset = 0
+offset_right = 640.0
+offset_bottom = 960.0
+script = ExtResource("1_script")
+
+[node name="dimmer" type="ColorRect" parent="." unique_id=741852964]
+layout_mode = 0
+offset_right = 640.0
+offset_bottom = 960.0
+color = Color(0, 0, 0, 0.65)
+
+[node name="panel" type="PanelContainer" parent="." unique_id=741852965]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 210.0
+offset_right = 580.0
+offset_bottom = 750.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_drop_panel")
+
+[node name="vbox" type="VBoxContainer" parent="panel" unique_id=741852966]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="header" type="HBoxContainer" parent="panel/vbox" unique_id=741852967]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="item_icon" type="TextureRect" parent="panel/vbox/header" unique_id=741852968]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="vbox_title" type="VBoxContainer" parent="panel/vbox/header" unique_id=741852969]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="item_name" type="Label" parent="panel/vbox/header/vbox_title" unique_id=741852970]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.45, 1)
+theme_override_font_sizes/font_size = 20
+text = "Item Name"
+vertical_alignment = 1
+
+[node name="item_qty" type="Label" parent="panel/vbox/header/vbox_title" unique_id=741852971]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.85, 0.9, 1)
+theme_override_font_sizes/font_size = 14
+text = "ครอบครอง: 0"
+vertical_alignment = 1
+
+[node name="btn_close" type="Button" parent="panel/vbox/header" unique_id=741852972]
+custom_minimum_size = Vector2(40, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = " ✕ "
+
+[node name="separator" type="HSeparator" parent="panel/vbox" unique_id=741852973]
+layout_mode = 2
+
+[node name="scroll" type="ScrollContainer" parent="panel/vbox" unique_id=741852974]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="content" type="RichTextLabel" parent="panel/vbox/scroll" unique_id=741852975]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_font_sizes/normal_font_size = 15
+theme_override_font_sizes/bold_font_size = 16
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+
+[node name="separator2" type="HSeparator" parent="panel/vbox" unique_id=741852976]
+layout_mode = 2
+
+[node name="footer" type="HBoxContainer" parent="panel/vbox" unique_id=741852977]
+layout_mode = 2
+alignment = 2
+
+[node name="btn_map" type="Button" parent="panel/vbox/footer" unique_id=741852978]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = " 🗺️ แผนที่โลก (World Map) "
+
+[node name="btn_ok" type="Button" parent="panel/vbox/footer" unique_id=741852979]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = " ปิด (Close) "

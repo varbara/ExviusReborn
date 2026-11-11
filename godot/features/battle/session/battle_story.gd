@@ -27,6 +27,12 @@ var cutscenes: Array = []
 var switch_check: Callable
 ## Callable(battle_script_id: String) -> Array of { cond, lines: [{ speaker, text }] }.
 var script_reader: Callable
+## Whether this battle is a story replay (from Recollection / Book of Memories).
+## When true, in-battle dialogue and between-wave cutscenes are never skipped by seen switches.
+var is_replay: bool = false
+## When an Array, only cutscenes whose story_event_id is in this list will play during the battle.
+## Used by Recollection so pure battle entries do not accidentally replay cutscenes from earlier scenes.
+var allowed_cutscenes: Variant = null
 
 
 func _init(plan: Array = [], mission_cutscenes: Array = [], switches: Callable = Callable(), scripts: Callable = Callable()) -> void:
@@ -42,7 +48,11 @@ static func for_params(params: Dictionary) -> BattleStory:
 	if not params.has("mission_id"):
 		return BattleStory.new()
 	var mission_id: String = str(params["mission_id"])
-	return BattleStory.new(EncounterResolver.build_wave_plan(mission_id), GameDatabase.get_mission_cutscenes(mission_id))
+	var story := BattleStory.new(EncounterResolver.build_wave_plan(mission_id), GameDatabase.get_mission_cutscenes(mission_id))
+	story.is_replay = bool(params.get("is_recollection", false)) or bool(params.get("is_replay", false))
+	if params.has("allowed_cutscene_ids"):
+		story.allowed_cutscenes = params["allowed_cutscene_ids"]
+	return story
 
 
 ## Ordered [{ speaker, text }] lines for wave `wave_index` (1-based) and trigger `cond`
@@ -72,12 +82,15 @@ func cutscenes_at(slot: int) -> Array[String]:
 	for cut in cutscenes:
 		if int(cut.get("after_wave", -1)) != slot:
 			continue
-		if _gate_seen(cut.get("switch_non_info")):
+		var sid: String = str(cut.get("story_event_id", ""))
+		if allowed_cutscenes != null and not (allowed_cutscenes is Array and allowed_cutscenes.has(sid)):
+			continue
+		if not is_replay and _gate_seen(cut.get("switch_non_info")):
 			continue
 		var replay_switch: Variant = cut.get("switch_info")
-		if switch_present(replay_switch) and not switch_check.call(replay_switch):
+		if not is_replay and switch_present(replay_switch) and not switch_check.call(replay_switch):
 			continue
-		ids.append(str(cut.get("story_event_id", "")))
+		ids.append(sid)
 	return ids
 
 
@@ -92,4 +105,6 @@ static func switch_present(value: Variant) -> bool:
 ## True when a first-time gate switch is already set: the player has seen this (the
 ## switch is set when the mission is cleared).
 func _gate_seen(gate: Variant) -> bool:
+	if is_replay:
+		return false
 	return switch_present(gate) and switch_check.call(gate)

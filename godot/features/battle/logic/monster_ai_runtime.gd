@@ -226,7 +226,8 @@ static func _triggers_hold(rule: Dictionary, state: MonsterAIState, ctx: Diction
 
 		var subject: Variant = _resolve_subject(trigger, ctx)
 		if subject == null:
-			_warn_once(type, "trigger scope %d is unsupported" % int(trigger.get("scope", 0)))
+			var scope: int = int(trigger.get("scope", 0))
+			_warn_once("%s/scope%d" % [type, scope], "trigger scope %d (%s) is not supported yet; this rule never fires" % [scope, _scope_name(scope)])
 			return false
 		var condition: Dictionary = {
 			"type": type,
@@ -277,13 +278,50 @@ static func _resolve_subject(trigger: Dictionary, ctx: Dictionary) -> Variant:
 		# read as dead and make every `alive:0` cross-monster trigger spuriously true.
 		var by_id: Dictionary = ctx.get("monsters_by_id", {})
 		return by_id[subject] if by_id.has(subject) else null
-	# TRIGGER_SCOPE_PARTY needs party-wide aggregates and TRIGGER_SCOPE_MONSTER_PART
-	# needs per-part modelling; neither exists yet.
+	# TRIGGER_SCOPE_PARTY: the whole party as one subject, so `alive` can ask
+	# "is anyone left standing" (subject 0) or "is the whole team down" (subject
+	# `all`). Without this the rule never fires and the monster silently loses a
+	# behaviour. Party-wide HP aggregates still need their own modelling, so only
+	# `alive` reads a party-wide subject for now.
+	if scope == MonsterAIScript.TRIGGER_SCOPE_PARTY:
+		return _party_subject(ctx.get("party", []), subject)
+	# TRIGGER_SCOPE_MONSTER_PART needs per-part modelling, which does not exist yet.
 	return null
+
+
+## A synthetic team-shaped subject for party-wide triggers. `alive` reads it through
+## _is_alive, so an empty dict means "nobody up":
+##   subject `all` -> alive only while SOMEONE is still standing (used with
+##                    alive:1 = "the team still has members", alive:0 = "team wiped")
+##   subject `0`   -> the party as one body, alive only while the team's total HP
+##                    is above zero
+static func _party_subject(party: Array, subject: String) -> Variant:
+	var any_alive: bool = false
+	var hp_total: int = 0
+	for member in party:
+		if member is Dictionary:
+			var hp: int = max(0, int(member.get("current_hp", 0)))
+			hp_total += hp
+			if hp > 0:
+				any_alive = true
+	var alive: bool = any_alive if subject.strip_edges().to_lower() == "all" else hp_total > 0
+	return {"current_hp": 1} if alive else {}
 
 
 ## The 1-based slot `subject` of an index-stable team array. {} for an empty or
 ## out-of-range slot, which reads as "dead" -- the right answer for `alive:0`.
+
+## Human-readable name for a trigger scope code, so the warning says WHICH kind of
+## subject is missing instead of only a bare number.
+static func _scope_name(scope: int) -> String:
+	match scope:
+		MonsterAIScript.TRIGGER_SCOPE_PARTY:
+			return "whole party"
+		MonsterAIScript.TRIGGER_SCOPE_MONSTER_PART:
+			return "monster part"
+		_:
+			return "unknown"
+
 static func _slot(team: Array, subject: String) -> Dictionary:
 	if not subject.is_valid_int():
 		return {}
@@ -380,9 +418,13 @@ static func _condition_holds(condition: Dictionary, subject: Dictionary, rule: D
 			_warn_once(type + " on turn_end", "an approximated condition is not trusted to end a turn; rule skipped")
 			return false
 		if type == "actbetween":
-			_warn_once(type, "approximated as 'action index divides evenly by %d'" % p0)
+			# Keyed by param too: a bare "actbetween" key reports whichever param
+			# happened to be evaluated first and hides the rest, which made the log
+			# look like the value was a fixed 5. The params actually in use are
+			# 2, 3, 4 and 5, so each distinct one deserves its own line.
+			_warn_once("%s:%d" % [type, p0], "approximated as 'action index divides evenly by %d' (0-based: fires on the first action of the turn)" % p0)
 			return p0 > 0 and state.acts_this_turn % p0 == 0
-		_warn_once(type, "approximated as 'action index (1-based) equals %d'" % p0)
+		_warn_once("%s:%d" % [type, p0], "approximated as 'action index (1-based) equals %d'" % p0)
 		return state.acts_this_turn + 1 == p0
 
 	_warn_once(type, "condition type not implemented")

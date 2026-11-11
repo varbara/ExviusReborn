@@ -74,6 +74,7 @@ class Page:
 	## {} for none, {"character": id}, {"image": id, "src_x": px, "src_y": px} or
 	## {"effect": file name}.
 	var graphic: Dictionary = {}
+	var visible: bool = true
 	## Byte 1 of the 4-byte block on graphic-less pages, -1 on pages with a graphic
 	## (where that block's position is not known yet).
 	var trigger: int = -1
@@ -303,6 +304,7 @@ func _parse_graphic(page: Page, record_type: int) -> bool:
 	if record_type == 1:
 		if not _need(19 + extra):
 			return false
+		page.visible = _bytes[_pos + 13] != 0 if (13 < 19 + extra) else true
 		page.graphic = {"character": EventBin.u32(_bytes, _pos)}
 		_pos += 19 + extra
 		return true
@@ -320,6 +322,7 @@ func _parse_graphic(page: Page, record_type: int) -> bool:
 		return true
 	if not _need(17 + extra):
 		return false
+	page.visible = _bytes[_pos + 11] != 0 if (11 < 17 + extra) else true
 	page.graphic = {
 		"image": image_id,
 		"src_x": EventBin.u16(_bytes, _pos + 2),

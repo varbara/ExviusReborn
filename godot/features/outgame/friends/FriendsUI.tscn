@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3]
 
 [ext_resource type="Script" path="res://features/outgame/friends/friends_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://dntla4oacfeg8" path="res://assets/ui/common/common_bg.png" id="2_bg"]
 
 [node name="FriendsUI" type="Control"]
 script = ExtResource("1_script")
@@ -12,6 +13,10 @@ anchor_bottom = 1.0
 offset_top = 120.0
 grow_horizontal = 2
 grow_vertical = 2
+
+[node name="CommonBg2" type="Sprite2D" parent="."]
+position = Vector2(320, 448)
+texture = ExtResource("2_bg")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1

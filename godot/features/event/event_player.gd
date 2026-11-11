@@ -93,6 +93,8 @@ func fast_forward(steps: int) -> bool:
 	for _i in steps:
 		if not running or _plays != scene:
 			return false
+		if stage.is_movie_playing():
+			stage.stop_movie()
 		stage.tap()
 		step_frame()
 	return running and _plays == scene
@@ -156,6 +158,9 @@ func _stop(reason: String) -> void:
 	if not running:
 		return
 	running = false
+	if stage != null:
+		stage.stop_movie()
+		stage.stop_ambient(0.5)
 	if interpreter != null and not interpreter.skipped_ops.is_empty():
 		print("EventPlayer: bin %s skipped opcodes %s" % [bin_id, _describe_ops(interpreter.skipped_ops)])
 	finished.emit(reason)

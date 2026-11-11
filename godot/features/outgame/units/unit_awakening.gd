@@ -1,6 +1,8 @@
 extends Control
 
 const UNIT_SCENE: PackedScene = preload("res://features/shared/Unit.tscn")
+const ITEM_DROP_POPUP_SCENE: PackedScene = preload("res://features/outgame/units/components/ItemDropPopup.tscn")
+var _drop_popup: Control = null
 
 @onready var back_button: Button = $UnitNamebgChara/UnitMinibutton1
 @onready var before_unit: TextureRect = $Status/unit_classup_before_unit
@@ -51,6 +53,9 @@ func _ready() -> void:
 		awaken_button.pressed.connect(_on_awaken_pressed)
 	if enhance_button != null:
 		enhance_button.pressed.connect(_on_enhance_pressed)
+	_drop_popup = ITEM_DROP_POPUP_SCENE.instantiate()
+	add_child(_drop_popup)
+	_drop_popup.dungeon_requested.connect(_on_dungeon_requested)
 
 func _refresh_before_visual() -> void:
 	var unit_visual: Control = UNIT_SCENE.instantiate() as Control
@@ -166,6 +171,10 @@ func _populate_awakening_requirements() -> void:
 			continue
 		if i >= material_ids.size():
 			slot.visible = false
+			var off_btn: TextureRect = slot.get_node_or_null("unit_classup_item_search_off") as TextureRect
+			var on_btn: TextureButton = slot.get_node_or_null("unit_classup_item_search_on") as TextureButton
+			if on_btn != null: on_btn.visible = false
+			if off_btn != null: off_btn.visible = true
 			continue
 		var item_id: int = int(material_ids[i])
 		var count: int = int(materials[material_ids[i]])
@@ -196,7 +205,21 @@ func _populate_awakening_requirements() -> void:
 			else:
 				have_node.remove_theme_color_override("font_color")
 
+		var search_off: TextureRect = slot.get_node_or_null("unit_classup_item_search_off") as TextureRect
+		var search_on: TextureButton = slot.get_node_or_null("unit_classup_item_search_on") as TextureButton
+		if search_on != null:
+			search_on.visible = true
+			if search_off != null:
+				search_off.visible = false
+			for conn in search_on.pressed.get_connections():
+				search_on.pressed.disconnect(conn.callable)
+			search_on.pressed.connect(_on_search_item_pressed.bind(item_id, count))
+
 		slot.visible = true
+
+func _on_search_item_pressed(item_id: int, required_count: int) -> void:
+	if _drop_popup != null:
+		_drop_popup.open(item_id, required_count)
 
 func _get_unit_texture(unit_inst: Dictionary) -> Texture2D:
 	if unit_inst.is_empty():
@@ -273,3 +296,9 @@ func _on_back_pressed() -> void:
 	var new_top: Node = UIManager.get_current_scene()
 	if new_top and new_top.has_method("_on_awaken_units"):
 		new_top.call_deferred("_on_awaken_units")
+
+
+## The drop popup asked to open a cleared stage's dungeon: go to the world map
+## with that mission preselected, replacing this screen.
+func _on_dungeon_requested(mission_id: String) -> void:
+	UIManager.push("map_ui", {"mission_id": mission_id})

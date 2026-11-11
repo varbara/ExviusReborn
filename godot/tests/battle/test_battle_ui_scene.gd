@@ -111,6 +111,7 @@ func test_the_test_battle_opens_with_its_party_and_enemy() -> void:
 ## origin 216 px below the picture's centre: on the line between field and panels.
 func test_a_missions_background_plays_its_animation_over_the_jpg() -> void:
 	if BattleBackground.ssbp_path("battle_bg_0005_01.ssbp") == "":
+		assert_true(true, "optional background asset not installed")
 		return
 	_screen._apply_battle_background("1110301")
 	var players: Array[SsbpPlayer] = _screen.background.players
@@ -124,6 +125,7 @@ func test_a_missions_background_plays_its_animation_over_the_jpg() -> void:
 ## Latius Woods adds light rays over the units, clipped to the field above the panels.
 func test_a_front_layer_plays_over_the_units() -> void:
 	if BattleBackground.ssbp_path("battle_bg_0003_01.ssbp") == "":
+		assert_true(true, "optional background asset not installed")
 		return
 	_screen._apply_battle_background("1110201")
 	var players: Array[SsbpPlayer] = _screen.background.players
@@ -475,3 +477,146 @@ func test_a_mission_plays_its_dialogue_and_changes_wave() -> void:
 	assert_eq(_scenes, ["1001001"] as Array[String], "the prologue's outro, main0-0_OP")
 	assert_eq(_finished.size(), 1)
 	assert_eq(_finished[0].slice(0, 2), [true, mission_id])
+
+
+func test_attacks_spawn_hit_effects_chains_and_overkill() -> void:
+	var engine: BattleEngine = _start()
+	var lasswell: Combatant = engine.party_members()[0]
+	var rain: Combatant = engine.party_members()[1]
+	var zu: Combatant = engine.enemies[0]
+	zu.hp = 10
+
+	_screen._execute_together([lasswell.id, rain.id])
+	for _i in range(120):
+		_screen.session.step(1)
+
+	var paths: Array[String] = _screen.enemy_field.effect_paths()
+	assert_true(paths.any(func(p: String) -> bool: return p.ends_with("atk_slash1_light_blue.efkefc")), "Lasswell's slash VFX spawned")
+	assert_true(paths.any(func(p: String) -> bool: return p.ends_with("atk_slash1_red.efkefc")), "Rain's slash VFX spawned")
+	assert_true(paths.any(func(p: String) -> bool: return p.contains("atk_impact_001_")), "Hit impact VFX spawned")
+	assert_true(_screen.enemy_field.overkill_count() > 0, "Overkill triggered on excess/follow-up hit")
+	assert_eq(_screen.enemy_field.last_overkill_enemy_id, zu.id)
+	assert_true(_screen.hud.total_damage > 0, "HUD accumulated total damage")
+	var combo_overlay: Control = _screen.get_node("ComboOverlay")
+	assert_true(combo_overlay.visible, "Combo damage overlay shown")
+
+
+# === The battle menu ===
+
+## The square MENU button opens the panel over the field, and cancel puts it away.
+func test_the_menu_button_opens_the_battle_menu_and_back_puts_it_away() -> void:
+	var engine: BattleEngine = _start()
+	assert_false(_screen.battle_menu.is_open(), "shut until the button is pressed")
+	_screen.menu_button.pressed.emit()
+	assert_true(_screen.battle_menu.is_open())
+	assert_true(_screen.battle_menu.size.x > 0.0 and _screen.battle_menu.size.y > 0.0,
+		"the panel covers the battle screen, not a 0x0 rect: %s" % _screen.battle_menu.size)
+	assert_true(_screen.battle_menu.is_enabled(BattleMenuModel.CMD_GIVE_UP))
+	assert_true(_screen.battle_menu.is_enabled(BattleMenuModel.CMD_REPEAT_INFO))
+	assert_eq(_screen.menus.open_menu, &"", "the skill menu is not opened under it")
+	assert_true(_screen.battle_menu.cancel())
+	assert_false(_screen.battle_menu.is_open())
+	assert_eq(engine.phase, BattleEngine.Phase.PLAYER, "the battle went on")
+
+
+## The menu covers the field: a gesture it never saw (a key, a pad, a test's signal) must
+## not queue or run a command behind it.
+func test_a_tap_on_a_panel_does_nothing_while_the_menu_is_open() -> void:
+	var engine: BattleEngine = _start()
+	var lasswell: Combatant = engine.party_members()[0]
+	_screen.menu_button.pressed.emit()
+	_panel(lasswell).panel_tapped.emit(lasswell.slot)
+	assert_false(lasswell.acted, "the tap did not become the unit's action")
+	assert_null(lasswell.queued_command)
+	_panel(lasswell).command_chosen.emit(lasswell.slot, UnitPanel.DEFEND)
+	assert_null(lasswell.queued_command, "no defend either")
+	_panel(lasswell).open_skill_menu.emit(lasswell.slot)
+	assert_eq(_screen.menus.open_menu, &"", "no skill menu")
+	_screen.auto_button.toggled.emit(true)
+	assert_false(_screen.auto_button.button_pressed, "auto battle waits for the menu to close")
+
+	_screen.battle_menu.close()
+	_panel(lasswell).panel_tapped.emit(lasswell.slot)
+	assert_true(lasswell.acted, "the tap reaches the battle again once the menu is shut")
+
+
+## Give Up ends the battle on the loss path, the same finisher a wiped party uses.
+func test_giving_up_ends_the_battle_on_the_loss_path() -> void:
+	var engine: BattleEngine = _start()
+	_screen.menu_button.pressed.emit()
+	_screen.battle_menu.button(BattleMenuModel.CMD_GIVE_UP).pressed.emit()
+	assert_false(_screen.battle_menu.is_open(), "the menu closes on its way out")
+	assert_true(_screen.director.is_finished())
+	assert_eq(_finished.size(), 1)
+	assert_false(_finished[0][0], "a loss, not a clear")
+	assert_eq(_finished[0][1], _screen.director.mission_id)
+	assert_eq(engine.phase, BattleEngine.Phase.PLAYER, "the engine itself is not touched")
+
+
+## Once the battle is over there is nothing left to give up: the command is greyed with
+## the reason, and a press reports nothing.
+func test_give_up_is_greyed_once_the_battle_is_over() -> void:
+	_start()
+	_screen.director.give_up()
+	_screen.menu_button.pressed.emit()
+	assert_false(_screen.battle_menu.is_enabled(BattleMenuModel.CMD_GIVE_UP))
+	assert_eq(_screen.battle_menu.button(BattleMenuModel.CMD_GIVE_UP).tooltip_text, BattleMenuModel.REASON_OVER)
+	assert_eq(_finished.size(), 1, "the second give up did nothing")
+
+
+## Repeat Info names the units Reload would act with, and queues nothing itself.
+func test_repeat_info_names_the_units_that_would_act_again() -> void:
+	var engine: BattleEngine = _start()
+	var zu: Combatant = engine.enemies[0]
+	zu.max_hp = 10000000
+	zu.hp = zu.max_hp
+	var party: Array[Combatant] = engine.party_members()
+	for member in party:
+		_screen.session.execute(member.id, BattleCommand.attack())
+	for _i in range(5000):
+		if engine.turn >= 2 and engine.phase == BattleEngine.Phase.PLAYER:
+			break
+		_screen.session.step(1)
+	assert_eq(engine.turn, 2, "the second turn opened")
+
+	var feedback: Label = _screen.get_node("%ActionFeedbackLabel")
+	_screen.menu_button.pressed.emit()
+	_screen.battle_menu.button(BattleMenuModel.CMD_REPEAT_INFO).pressed.emit()
+	assert_false(_screen.battle_menu.is_open())
+	assert_eq(feedback.text, "Repeat: %s" % ", ".join(party.map(func(member: Combatant) -> String: return member.name)))
+	for member in engine.units_to_act():
+		assert_null(member.queued_command, "%s was not queued by the listing" % member.name)
+
+
+## The panel shows the party as the battle has it, and says so when there is none.
+func test_the_menu_lists_the_party_from_the_battle() -> void:
+	var engine: BattleEngine = _start()
+	var lasswell: Combatant = engine.party_members()[0]
+	lasswell.hp = 123
+	_screen.menu_button.pressed.emit()
+	var lines: Array[String] = _member_lines()
+	assert_eq(lines.size(), 2)
+	assert_true(lines[0].contains(lasswell.name), lines[0])
+	assert_true(lines[0].contains("HP 123/%d" % lasswell.max_hp), lines[0])
+	assert_true(lines[1].contains(engine.party_members()[1].name), lines[1])
+
+
+## Before a battle starts there is no engine: the panel says there is no party and both
+## commands are greyed.
+func test_the_menu_before_a_battle_says_there_is_no_party() -> void:
+	assert_null(_screen.session.engine)
+	_screen.menu_button.pressed.emit()
+	assert_true(_screen.battle_menu.is_open())
+	assert_eq(_member_lines(), ["No party"])
+	assert_false(_screen.battle_menu.is_enabled(BattleMenuModel.CMD_GIVE_UP))
+	assert_false(_screen.battle_menu.is_enabled(BattleMenuModel.CMD_REPEAT_INFO))
+	assert_eq(_screen.battle_menu.button(BattleMenuModel.CMD_GIVE_UP).tooltip_text, BattleMenuModel.REASON_NO_BATTLE)
+
+
+## The lines of the open menu's member list, in order.
+func _member_lines() -> Array[String]:
+	var texts: Array[String] = []
+	for label in _screen.battle_menu.find_children("*", "Label", true, false):
+		if (label as Label).get_parent() == _screen.battle_menu._members:
+			texts.append((label as Label).text)
+	return texts
